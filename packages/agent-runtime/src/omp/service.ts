@@ -74,6 +74,8 @@ type SessionRecord = {
   /** Model / thinking explicitly chosen in the app for this session. */
   model?: OmpModelRef;
   thinkingLevel?: string;
+  /** Fast mode chosen in the app for this session. */
+  fast?: boolean;
 };
 
 type HiddenPrefs = { hiddenFiles?: string[] };
@@ -87,7 +89,33 @@ export type OmpModelInfo = {
   input?: string[];
   /** Levels omp accepts for this model ("off" first); empty when reasoning is not controllable. */
   thinkingLevels: string[];
+  /** omp's fast mode (priority service tier) can apply to this model. */
+  fast: boolean;
 };
+
+/**
+ * Mirrors omp's serviceTierFamily()/shouldSendServiceTier("priority") so the
+ * UI can tell which models take /fast. omp still decides: set_fast_mode errors
+ * for models it rejects.
+ */
+export function ompModelSupportsFast(model: any): boolean {
+  const provider = model?.provider;
+  const api = model?.api;
+  const identity = model?.identity?.class;
+  const openAiApi = api === "openai-completions" || api === "openai-responses" || api === "openai-codex-responses";
+  const openAiRelay = provider !== "fireworks" && provider !== "github-copilot" && openAiApi && identity === "openai";
+  let family: string | undefined;
+  if (provider === "openrouter") family = ["anthropic", "gemini", "openai"].includes(identity) ? identity : undefined;
+  else if (provider === "openai" || provider === "openai-codex") family = "openai";
+  else if (api === "anthropic-messages") family = "anthropic";
+  else if (provider === "google" || provider === "google-vertex") family = "google";
+  else if (openAiRelay) family = "openai";
+  if (!family) return false;
+  if (family === "openai" && api === "openai-codex-responses" && Array.isArray(model.serviceTiers) && model.serviceTiers.length > 0) {
+    return model.serviceTiers.includes("priority");
+  }
+  return true;
+}
 
 export const OMP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -535,6 +563,7 @@ export class OmpSessionService {
           id: model.id,
           name: typeof model.name === "string" && model.name ? model.name : model.id,
           reasoning: model.reasoning === true,
+          fast: ompModelSupportsFast(model),
           thinkingLevels: model.reasoning === true && Array.isArray(model.thinking?.efforts) && model.thinking.efforts.length > 0
             ? ["off", ...model.thinking.efforts.filter((e: unknown): e is string => typeof e === "string" && (OMP_THINKING_LEVELS as readonly string[]).includes(e))]
             : [],
@@ -564,6 +593,32 @@ export class OmpSessionService {
     if (runtime?.alive) await runtime.setModel(model);
     record.model = model;
     return this.summary(record, this.readFile(record));
+  }
+
+  /** Current fast-mode choice for a session (or, without one, for new chats). */
+  fastState(sessionId?: string): { enabled: boolean } {
+    if (!sessionId) return { enabled: this.prefs().fast === true };
+    const record = this.record(sessionId);
+    if (record.fast !== undefined) return { enabled: record.fast };
+    const file = this.readFile(record);
+    if (file) return { enabled: file.fast === true };
+    return { enabled: this.prefs().fast === true };
+  }
+
+  /** Toggle omp fast mode (`set_fast_mode`); remembered for new chats. */
+  async setFast(input: { sessionId?: string; enabled: boolean }): Promise<{ enabled: boolean; active?: boolean }> {
+    let result: { enabled: boolean; active?: boolean } = { enabled: input.enabled };
+    if (input.sessionId) {
+      const record = this.record(input.sessionId);
+      const runtime = this.runtimes.get(record.id);
+      if (runtime?.alive) {
+        const reply = await runtime.request<{ enabled?: boolean; active?: boolean }>({ type: "set_fast_mode", enabled: input.enabled });
+        result = { enabled: reply?.enabled ?? input.enabled, ...(typeof reply?.active === "boolean" ? { active: reply.active } : {}) };
+      }
+      record.fast = result.enabled;
+    }
+    this.savePrefs({ fast: input.enabled });
+    return result;
   }
 
   async setThinkingLevel(input: { sessionId?: string; level: string }): Promise<SessionSummary | null> {
@@ -787,9 +842,14 @@ export class OmpSessionService {
     });
     let runtime: OmpSessionRuntime | undefined;
     this.opening.set(id, opening);
+    const fresh = !(record.path && existsSync(record.path));
     try {
       runtime = await opening;
       this.runtimes.set(id, runtime);
+      // A new chat inherits the remembered fast-mode choice (omp has no CLI flag for it).
+      const wantFast = record.fast ?? (fresh ? this.prefs().fast : undefined);
+      // omp handles stdin commands in order, so this lands before the first prompt.
+      if (wantFast !== undefined) void runtime.request({ type: "set_fast_mode", enabled: wantFast }).catch(() => undefined);
       return runtime;
     } finally {
       this.opening.delete(id);

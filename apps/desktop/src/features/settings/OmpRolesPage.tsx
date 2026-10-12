@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, type OmpRole } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { Button } from "../../components/ui";
@@ -32,6 +33,7 @@ function ModelSelect({ value: full, models, onChange, testId }: { value: string;
  * cleared; custom roles can be created and deleted.
  */
 export function OmpRolesPage() {
+  const { t } = useTranslation();
   const showToast = useAppStore((s) => s.showToast);
   const [roles, setRoles] = useState<OmpRole[] | null>(null);
   const [models, setModels] = useState<Model[]>([]);
@@ -63,8 +65,8 @@ export function OmpRolesPage() {
   return (
     <div data-omp-roles-page="true">
       <SettingsCard
-        title="omp roles"
-        description="Model roles from omp's own config (modelRoles in ~/.omp/agent/config.yml, edited via `omp config set`). omp uses them for @role selectors, subtasks, commits and more; the composer role switcher applies a role's model to the chat."
+        title={t("settings.rolesCard")}
+        description={t("settings.rolesDescription")}
       >
         {error ? <SettingsRow title="Error">{error}</SettingsRow> : null}
         {!roles && !error ? <SettingsRow title="Loading…">{null}</SettingsRow> : null}
@@ -86,7 +88,7 @@ export function OmpRolesPage() {
           </SettingsRow>
         ))}
       </SettingsCard>
-      <SettingsCard title="New role">
+      <SettingsCard title={t("settings.rolesNew")}>
         <SettingsRow title="Name and model">
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input

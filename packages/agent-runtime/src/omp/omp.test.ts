@@ -157,7 +157,7 @@ describe("omp model selection", () => {
 
     const service = new OmpSessionService({ agentDir: join(root, "agent"), sessionRoot });
     const catalog = await service.listModels();
-    expect(catalog.models).toEqual([{ provider: "p1", id: "m1", name: "Model One", reasoning: true, thinkingLevels: ["off", "low", "high"] }]);
+    expect(catalog.models).toEqual([{ provider: "p1", id: "m1", name: "Model One", reasoning: true, fast: false, thinkingLevels: ["off", "low", "high"] }]);
 
     const created = service.create({ projectPath: root });
     await service.setModel({ sessionId: created.id, provider: "p1", modelId: "m1" });

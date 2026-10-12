@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SessionThinkingLevel } from "@pi-desktop/shared";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
-import { IconBot, IconSparkles, IconCheck, IconChevronDown, IconSearch } from "../../../components/icons";
+import { IconBolt, IconBot, IconSparkles, IconCheck, IconChevronDown, IconSearch } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { api } from "../../../lib/api";
 
@@ -58,6 +58,8 @@ export function OmpModelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [levelOpen, setLevelOpen] = useState(false);
+  const [fast, setFast] = useState(false);
+  const [fastBusy, setFastBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -133,9 +135,44 @@ export function OmpModelPicker({
   const levels = selectedInfo?.thinkingLevels ?? [];
 
   const shownLevel = levels.length ? clampLevel(thinkingLevel, levels) : null;
+  const sessionId = session?.id;
+  useEffect(() => {
+    let cancelled = false;
+    api.ompGetFast(sessionId).then((r) => { if (!cancelled) setFast(r.enabled); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [sessionId]);
+  const fastSupported = selectedInfo ? selectedInfo.fast === true : false;
+  const toggleFast = async () => {
+    setFastBusy(true);
+    try {
+      const result = await api.ompSetFast({ sessionId, enabled: !fast });
+      setFast(result.enabled);
+      if (sessionId) onSessionChanged();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+    } finally {
+      setFastBusy(false);
+    }
+  };
+  const fastTooltip = !fastSupported ? t("chat.ompFastUnsupported") : fast ? t("chat.ompFastOn") : t("chat.ompFastOff");
 
   return (
     <>
+    {selectedInfo ? (
+      <TooltipButton
+        type="button"
+        className={`icon-btn composer-model-thinking-chip omp-fast-toggle ${fast && fastSupported ? "active is-on" : ""}`}
+        tooltip={fastTooltip}
+        ariaLabel={fastTooltip}
+        aria-pressed={fast && fastSupported}
+        data-omp-fast-toggle={fast && fastSupported ? "on" : "off"}
+        disabled={controlsBlocked || fastBusy || !fastSupported}
+        onClick={() => void toggleFast()}
+      >
+        <span className="composer-model-thinking-icon" aria-hidden="true"><IconBolt size={14} /></span>
+        <span className="composer-model-thinking-model">{t("chat.ompFast")}</span>
+      </TooltipButton>
+    ) : null}
     {levels.length > 0 && shownLevel ? (
       <AnchoredMenu
         className="composer-model-thinking"

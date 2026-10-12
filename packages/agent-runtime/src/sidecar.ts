@@ -450,6 +450,16 @@ async function handle(method: string, params: any): Promise<unknown> {
       });
       return { session };
     }
+    case "omp.fast.get": {
+      const sessionId = typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined;
+      return (await loadOmp()).ompSessionService().fastState(sessionId);
+    }
+    case "omp.fast.set": {
+      return (await loadOmp()).ompSessionService().setFast({
+        sessionId: typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined,
+        enabled: params.enabled === true,
+      });
+    }
     case "omp.roles.list": {
       return { roles: await (await loadOmp()).listOmpRoles() };
     }

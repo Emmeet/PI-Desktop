@@ -13,6 +13,8 @@ export type OmpSessionFile = {
   providerId?: string;
   modelId?: string;
   thinkingLevel?: string;
+  /** omp fast mode (a priority/ultrafast service tier) recorded in the file. */
+  fast?: boolean;
   messages: UiMessage[];
 };
 
@@ -124,7 +126,12 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
   const messages: UiMessage[] = [];
   let model: { providerId?: string; modelId?: string } = {};
   let thinkingLevel: string | undefined;
+  let fast: boolean | undefined;
   for (const entry of branch) {
+    if (entry.type === "service_tier_change") {
+      const tiers = entry.serviceTier && typeof entry.serviceTier === "object" ? Object.values(entry.serviceTier as Record<string, unknown>) : [];
+      fast = tiers.some((tier) => tier === "priority" || tier === "ultrafast");
+    }
     if (entry.type === "thinking_level_change" && typeof entry.thinkingLevel === "string") thinkingLevel = entry.thinkingLevel;
     const ts = typeof entry.timestamp === "string" ? entry.timestamp : header.timestamp;
     if (entry.type === "model_change") model = splitModel(entry.model ?? (entry.provider && entry.modelId ? `${entry.provider}/${entry.modelId}` : undefined));
@@ -149,6 +156,7 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
     title: title ?? (firstUser ? firstUser.content.slice(0, 80) : undefined),
     ...model,
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(fast !== undefined ? { fast } : {}),
     messages,
   };
 }

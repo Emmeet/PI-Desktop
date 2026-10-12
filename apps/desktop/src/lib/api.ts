@@ -592,7 +592,7 @@ export const api = {
     })),
   ompListModels: (refresh = false) =>
     invoke<{
-      models: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; input?: string[]; thinkingLevels?: string[] }>;
+      models: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; input?: string[]; thinkingLevels?: string[]; fast?: boolean }>;
       defaultModel: { provider: string; modelId: string } | null;
       selected: { provider: string; modelId: string } | null;
       thinkingLevel: string | null;
@@ -600,6 +600,10 @@ export const api = {
     }>(IPC.invoke.ompModelsList, { refresh }),
   ompSetModel: (input: { sessionId?: string; provider: string; modelId: string }) =>
     invoke<{ session: SessionSummary | null }>(IPC.invoke.ompModelSet, input),
+  ompGetFast: (sessionId?: string) =>
+    invoke<{ enabled: boolean }>(IPC.invoke.ompFastGet, { sessionId }),
+  ompSetFast: (input: { sessionId?: string; enabled: boolean }) =>
+    invoke<{ enabled: boolean; active?: boolean }>(IPC.invoke.ompFastSet, input),
   ompListRoles: () =>
     invoke<{ roles: OmpRole[] }>(IPC.invoke.ompRolesList, {}),
   ompSetRole: (input: { role: string; model: string | null }) =>

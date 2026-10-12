@@ -181,6 +181,17 @@ export function registerSessionIpc({
     }
     return sidecar.call("omp.model.set", input);
   });
+  handle(IPC.invoke.ompFastGet, async (input: { sessionId?: string } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.fast.get", { sessionId: typeof input?.sessionId === "string" ? input.sessionId : undefined });
+  });
+  handle(IPC.invoke.ompFastSet, async (input: { sessionId?: string; enabled?: boolean } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.fast.set", {
+      sessionId: typeof input?.sessionId === "string" ? input.sessionId : undefined,
+      enabled: input?.enabled === true,
+    });
+  });
   handle(IPC.invoke.ompRolesList, async () => {
     if (!sidecar) throw new Error("agent sidecar unavailable");
     return sidecar.call("omp.roles.list", {});

@@ -785,3 +785,13 @@
   width: min(200px, calc(100vw - 24px));
   padding: 6px;
 }
+
+/* omp fast mode toggle: on reads as a filled chip, unsupported as dimmed. */
+.omp-fast-toggle.is-on {
+  background: var(--ds-tile-deep);
+  color: var(--ds-text-primary);
+}
+
+.omp-fast-toggle:disabled {
+  opacity: 0.45;
+}

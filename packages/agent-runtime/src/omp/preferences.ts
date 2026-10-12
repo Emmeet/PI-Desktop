@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export type OmpModelRef = { provider: string; modelId: string };
-export type OmpPreferences = { model?: OmpModelRef; thinkingLevel?: string; hiddenFiles?: string[] };
+export type OmpPreferences = { model?: OmpModelRef; thinkingLevel?: string; fast?: boolean; hiddenFiles?: string[] };
 
 /** App-owned preferences (never omp's own config): last chosen model and thinking level. */
 export function ompPreferencesPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -20,6 +20,7 @@ export function readOmpPreferences(path = ompPreferencesPath()): OmpPreferences 
       prefs.model = { provider: value.model.provider, modelId: value.model.modelId };
     }
     if (typeof value?.thinkingLevel === "string") prefs.thinkingLevel = value.thinkingLevel;
+    if (typeof value?.fast === "boolean") prefs.fast = value.fast;
     if (Array.isArray(value?.hiddenFiles)) prefs.hiddenFiles = value.hiddenFiles.filter((entry: unknown) => typeof entry === "string");
     return prefs;
   } catch {

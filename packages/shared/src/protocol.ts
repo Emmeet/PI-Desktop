@@ -131,6 +131,8 @@ export const IPC = {
     ompModelSet: "pi-desktop/omp/model/set",
     ompThinkingSet: "pi-desktop/omp/thinking/set",
     ompRolesList: "pi-desktop/omp/roles/list",
+    ompFastGet: "pi-desktop/omp/fast/get",
+    ompFastSet: "pi-desktop/omp/fast/set",
     ompRoleSet: "pi-desktop/omp/roles/set",
     sessionFork: "pi-desktop/session/fork",
     sessionMoveProject: "pi-desktop/session/moveProject",
