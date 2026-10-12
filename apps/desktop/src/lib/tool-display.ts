@@ -193,6 +193,11 @@ export function getToolSummary(toolName: string | undefined, args: unknown) {
     }
     const key = getToolSummaryKey(toolName, args);
     if (key) return compact(summaryText(record[key]));
+    // omp's hashline edit: `{ input: "[path#HASH]\n…" }`; name the files it touches.
+    if (action === "edit" && typeof record.input === "string") {
+      const paths = [...record.input.matchAll(/^\[([^\]#\n]+)#[^\]\n]*\]/gm)].map((m) => m[1]);
+      if (paths.length) return compact([...new Set(paths)].join(", "));
+    }
     const fallback = formatToolValue(record);
     if (fallback && fallback !== "{}") return compact(fallback);
   }

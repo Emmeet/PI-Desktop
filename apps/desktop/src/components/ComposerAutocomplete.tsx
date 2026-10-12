@@ -51,10 +51,11 @@ const GROUP_KEYS: Record<ComposerCommand["kind"], string> = {
   extension: "chat.slashGroupExtensions",
   skill: "chat.slashGroupSkills",
   mcp: "chat.slashGroupMcp",
+  omp: "chat.slashGroupOmp",
 };
 
 function CommandIcon({ kind }: { kind: ComposerCommand["kind"] }) {
-  if (kind === "template") return <IconSlash size={14} />;
+  if (kind === "template" || kind === "omp") return <IconSlash size={14} />;
   if (kind === "skill") return <IconBookOpen size={14} />;
   if (kind === "plugin" || kind === "extension" || kind === "mcp") return <IconPlug size={14} />;
   return <IconSparkles size={14} />;

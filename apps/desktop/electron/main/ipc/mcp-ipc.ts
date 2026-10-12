@@ -1,5 +1,8 @@
 import { IPC, parseMcpImport, type ActivationScope, type AgentCapabilityMove, type AgentCapabilityQuery, type MarketSource, type McpServerInput, type McpServerRecord, type McpServerStatus } from "@pi-desktop/shared";
 import type { McpOAuthManager } from "../mcp-oauth";
+import { randomUUID } from "node:crypto";
+import { shell } from "electron";
+import { cancelOmpMcpOAuth, ompMcpSignedIn, runOmpMcpOAuth } from "./omp-extras-ipc";
 import type { HostProcess } from "../host-process";
 import type { McpRegistrySearchResult } from "../mcp-registry-catalog";
 import type { UserMcpRuntime } from "../user-mcp";
@@ -63,10 +66,15 @@ handle(IPC.invoke.mcpList, async (query: Partial<AgentCapabilityQuery> = {}) => 
     // list itself must include disabled records for the settings page.
     await refreshUserMcp(currentWorkspacePath());
     const statuses = await Promise.all(
-      (await userMcp.refreshStatuses()).map(async (status) => ({
-        ...status,
-        hasOauth: oauth ? await oauth.hasOAuth(status.serverId) : false,
-      })),
+      (await userMcp.refreshStatuses()).map(async (status) => {
+        // Signed in through omp: omp (which runs the server for chats) has the token.
+        const ompSigned = ompMcpSignedIn(result.servers?.find((server) => server.id === status.serverId)?.url);
+        return {
+          ...status,
+          ...(ompSigned ? { authRequired: false } : {}),
+          hasOauth: ompSigned || (oauth ? await oauth.hasOAuth(status.serverId) : false),
+        };
+      }),
     );
     return { servers: result.servers ?? [], statuses };
   });
@@ -167,7 +175,6 @@ handle(IPC.invoke.mcpList, async (query: Partial<AgentCapabilityQuery> = {}) => 
     IPC.invoke.mcpOauthStart,
     async (payload: { id: string } & Partial<AgentCapabilityQuery>) => {
       if (!host) throw new Error("host unavailable");
-      if (!oauth) throw new Error("OAuth manager unavailable");
       const query = {
         ...(payload.level ? { level: payload.level } : {}),
         ...(payload.projectPath ? { projectPath: payload.projectPath } : {}),
@@ -179,13 +186,35 @@ handle(IPC.invoke.mcpList, async (query: Partial<AgentCapabilityQuery> = {}) => 
         throw new Error(`MCP server ${payload.id} is not an HTTP transport server`);
       }
 
-      return oauth.start(server.id, server.url, server);
+      // omp hosts the MCP servers for every chat, so the token must land in
+      // omp's credential store: run omp's own OAuth flow for this URL.
+      const loginId = randomUUID();
+      const emit = (event: Record<string, unknown>) =>
+        sendToRenderer(IPC.event.mcpOauth, { loginId, serverId: server.id, ...event });
+      void runOmpMcpOAuth(server.url, (event) => {
+        if (event.kind === "authUrl") {
+          void shell.openExternal(event.url).catch(() => undefined);
+          emit({ kind: "authUrl", url: event.url, opened: true });
+        } else {
+          emit({ kind: "progress", message: event.message });
+        }
+      }).then(
+        () => emit({
+          kind: "done",
+          status: { serverId: server.id, state: "ready", toolCount: 0, updatedAt: Date.now(), hasOauth: true },
+        }),
+        (error) => emit((error as { cancelled?: boolean })?.cancelled
+          ? { kind: "cancelled" }
+          : { kind: "error", message: error instanceof Error ? error.message : String(error) }),
+      );
+      return { ok: true, loginId };
     },
   );
 
   handle(
     IPC.invoke.mcpOauthCancel,
     async (payload: { loginId?: string; id?: string }) => {
+      if (cancelOmpMcpOAuth()) return { ok: true };
       if (!oauth) return { ok: false };
       const target = payload?.loginId || payload?.id;
       return { ok: typeof target === "string" && oauth.cancel(target) };

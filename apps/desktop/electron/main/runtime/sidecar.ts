@@ -240,6 +240,10 @@ export function createSidecarRuntime({
       if (message) sendToRenderer(IPC.event.toast, { message: `omp: ${message}` });
       return;
     }
+    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed") {
+      sendToRenderer(IPC.event.ompEvent, { method, params });
+      return;
+    }
     if (method === "native.ui.cancelled") return;
     if (method === "native.agent.event") {
       // Native AgentSession already persisted the event to its canonical Pi

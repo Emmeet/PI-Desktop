@@ -140,6 +140,15 @@ export const IPC = {
     ompPlanGet: "pi-desktop/omp/plan/get",
     ompPlanSet: "pi-desktop/omp/plan/set",
     ompTodosSet: "pi-desktop/omp/todos/set",
+    /** Allow-listed omp sidecar calls (subagents, commands, tree, stats, login). */
+    ompCall: "pi-desktop/omp/call",
+    /** Whole-install usage from `omp stats --json`. */
+    ompUsageStats: "pi-desktop/omp/usage/stats",
+    /** Read / write allow-listed omp settings (`omp config get|set`). */
+    ompConfigGet: "pi-desktop/omp/config/get",
+    ompConfigSet: "pi-desktop/omp/config/set",
+    /** Undo one omp edit by restoring its old text (only while the file is unchanged since). */
+    ompRevertEdit: "pi-desktop/omp/edit/revert",
     sessionFork: "pi-desktop/session/fork",
     sessionMoveProject: "pi-desktop/session/moveProject",
     sessionSearch: "pi-desktop/session/search",
@@ -414,6 +423,8 @@ export const IPC = {
     agentQueueChanged: "pi-desktop/agent/event/queueChanged",
     hostStatus: "pi-desktop/app/event/hostStatus",
     toast: "pi-desktop/app/event/toast",
+    /** omp side-channel updates: subagents, login flow, command catalog, MCP OAuth. */
+    ompEvent: "pi-desktop/omp/event",
     /**
      * The first plaintext hop to an endpoint the user typed, sent once and only
      * until the shell records `networkPolicy.insecureNoticeAcknowledged`. The

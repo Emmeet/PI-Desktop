@@ -92,7 +92,12 @@ export type ToolBlock =
       lines: ToolDiffLine[];
       hidden: number;
       copy: string;
+      /** File path the diff applies to (omp edits). */
+      path?: string;
+      /** Enough to undo an omp edit: restore `oldText` while the file still holds `newText`. */
+      revert?: { path: string; oldText: string; newText: string };
     })
+  | (BlockBase & { kind: "images"; images: { src: string; mimeType: string }[] })
   | (BlockBase & { kind: "files"; paths: string[]; hidden: number })
   | (BlockBase & { kind: "matches"; groups: ToolMatchGroup[]; hidden: number })
   | (BlockBase & { kind: "fields"; rows: ToolFieldRow[] })
@@ -160,6 +165,12 @@ export function toolResultPayload(message: ToolPresentationMessage): unknown {
   if (typeof raw === "string") return raw;
   const envelope = asRecord(raw);
   if (!envelope) return raw;
+  const details = asRecord(envelope.details);
+  // omp returns `details: {}` for tools whose whole answer is the text.
+  if (details && Object.keys(details).length === 0) {
+    const text = envelopeText(envelope);
+    return text && text.trim() && text.trim() !== "{}" ? text : details;
+  }
   if (envelope.details !== undefined && envelope.details !== null) {
     return envelope.details;
   }
@@ -548,6 +559,62 @@ export function hasToolDetails(message: ToolPresentationMessage): boolean {
   return message.toolArgs !== undefined;
 }
 
+/** omp's own memory tools (`recall`, `retain`, `reflect`, `memory_edit`). */
+const OMP_MEMORY_TOOLS = new Set(["recall", "retain", "reflect", "memory_edit"]);
+
+export function isOmpMemoryTool(toolName?: string): boolean {
+  return OMP_MEMORY_TOOLS.has((toolName ?? "").toLowerCase());
+}
+
+const MAX_TOOL_IMAGES = 6;
+
+/** Images in a tool result envelope (omp browser screenshots, generated images). */
+function envelopeImages(raw: unknown): ToolBlock | null {
+  const envelope = asRecord(raw);
+  if (!envelope || !Array.isArray(envelope.content)) return null;
+  const images = envelope.content.flatMap((block) => {
+    const record = asRecord(block);
+    if (record?.type !== "image" || typeof record.data !== "string" || !record.data) return [];
+    const mimeType = typeof record.mimeType === "string" && /^image\/[\w.+-]+$/.test(record.mimeType) ? record.mimeType : "image/png";
+    return [{ src: `data:${mimeType};base64,${record.data}`, mimeType }];
+  });
+  return images.length ? { kind: "images", role: "output", images: images.slice(0, MAX_TOOL_IMAGES) } : null;
+}
+
+/** omp's edit diff (` 1|ctx`, `-2|old`, `+2|new`) as diff lines. */
+export function parseOmpDiff(diff: string): ToolDiffLine[] {
+  return diff.split("\n").flatMap((raw): ToolDiffLine[] => {
+    if (!raw) return [];
+    const sign = raw[0];
+    const body = raw.slice(1).replace(/^\s*\d+\|/, "");
+    if (sign === "+") return [{ type: "add", text: body }];
+    if (sign === "-") return [{ type: "del", text: body }];
+    return [{ type: "context", text: sign === " " ? body : raw.replace(/^\s*\d+\|/, "") }];
+  });
+}
+
+const MAX_DIFF_LINES = 400;
+
+function ompEditBlock(details: Record<string, unknown> | null): ToolBlock | null {
+  const diff = stringAt(details, "diff");
+  if (diff === null) return null;
+  const all = parseOmpDiff(diff);
+  const path = stringAt(details, "path") ?? undefined;
+  const oldText = typeof details?.oldText === "string" ? details.oldText : null;
+  const newText = typeof details?.newText === "string" ? details.newText : null;
+  return {
+    kind: "diff",
+    role: "diff",
+    lines: all.slice(0, MAX_DIFF_LINES),
+    hidden: Math.max(0, all.length - MAX_DIFF_LINES),
+    copy: diff,
+    ...(path ? { path, label: path.split(/[\\/]/).pop() } : {}),
+    ...(path && oldText !== null && newText !== null && stringAt(details, "op") !== "create"
+      ? { revert: { path, oldText, newText } }
+      : {}),
+  };
+}
+
 function resultBlocks(
   action: ToolAction,
   message: ToolPresentationMessage,
@@ -574,12 +641,33 @@ function resultBlocks(
     });
   }
 
+  const envelope = asRecord(message.toolResult);
+  const resultText = envelope ? envelopeText(envelope) : null;
+  const images = envelopeImages(message.toolResult);
+
+  if (isOmpMemoryTool(message.toolName)) {
+    const query = stringAt(args, "query", "content", "text", "memory", "question");
+    if (query) blocks.push(codeBlock("input", query, "markdown"));
+    const answer = typeof payload === "string" ? payload : resultText;
+    if (answer && answer.trim()) blocks.push(codeBlock("output", answer, "markdown"));
+    return blocks;
+  }
+
   switch (action) {
     case "read": {
       const content = stringAt(details, "content");
+      const display = asRecord(details?.displayContent);
+      const path =
+        stringAt(details, "path") ??
+        stringAt(asRecord(asRecord(details?.meta)?.source), "value") ??
+        stringAt(args, "path");
       if (content !== null) {
-        const path = stringAt(details, "path") ?? stringAt(args, "path");
         blocks.push(codeBlock("content", content, langForPath(path)));
+      } else if (display && typeof display.text === "string") {
+        // omp read: the snippet it showed, with its starting line.
+        const start = numberAt(display, "startLine");
+        const label = start && start > 1 ? `${path?.split(/[\\/]/).pop() ?? ""} · L${start}` : undefined;
+        blocks.push(codeBlock("content", display.text, langForPath(path), label ? { label } : undefined));
       }
       break;
     }
@@ -592,6 +680,12 @@ function resultBlocks(
       break;
     }
     case "edit": {
+      const ompDiff = ompEditBlock(details);
+      if (ompDiff) {
+        blocks.push(ompDiff);
+        mapped = true;
+        break;
+      }
       const ops = stringAt(args, "ops");
       // Workspace edits already own a ReviewChangeCard with the real diff;
       // only scratch edits and imported sessions need the model's stated ops.
@@ -623,7 +717,9 @@ function resultBlocks(
       const stdout =
         typeof details?.stdout === "string"
           ? details.stdout
-          : stringAt(details, "output");
+          : stringAt(details, "output") ??
+            // omp: the output is the result text (live while it streams).
+            (typeof payload === "string" ? payload : resultText);
       if (stdout) blocks.push(codeBlock("stdout", stdout));
       const stderr = stringAt(details, "stderr");
       if (stderr !== null) {
@@ -706,6 +802,13 @@ function resultBlocks(
     }
     default:
       break;
+  }
+
+  if (images) {
+    // An image-only result (a screenshot) still says what it shows in text.
+    if (blocks.length === 0 && resultText && resultText.trim()) blocks.push(codeBlock("output", resultText));
+    blocks.push(images);
+    mapped = true;
   }
 
   // Host-side scoping notes ("results are truncated…", "N long lines were cut")

@@ -16,6 +16,8 @@ import {
 } from "../../lib/settings-search";
 import { pluginViewIcon } from "../../lib/plugin-view-icons";
 import {
+  IconActivity,
+  IconKey,
   IconArchive,
   IconBookOpen,
   IconBot,
@@ -35,6 +37,9 @@ import {
 import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../components/ui";
 import { OmpRolesPage } from "./OmpRolesPage";
 import { OmpApprovalSection } from "./OmpApprovalSection";
+import { OmpAccountsSection } from "./OmpAccountsSection";
+import { OmpMemorySection } from "./OmpMemorySection";
+import { OmpUsagePage } from "./OmpUsagePage";
 import { KeyboardShortcutsSection } from "../../components/settings/KeyboardShortcutsSection";
 import { FontFamilyRow } from "../../components/settings/FontFamilyRow";
 import { ThinkingDisplayModeRow } from "../../components/settings/ThinkingDisplayModeRow";
@@ -243,6 +248,8 @@ export function SettingsPage() {
       sync: <IconCloudDown size={14} />,
       remoteHosts: <IconGlobe size={14} />,
       voice: <IconMic size={14} />,
+      accounts: <IconKey size={14} />,
+      usage: <IconActivity size={14} />,
       about: <IconInfo size={14} />,
     };
     return navEntries.map((entry) => ({
@@ -559,8 +566,13 @@ export function SettingsPage() {
             <>
               <OmpRolesPage />
               <OmpApprovalSection />
+              <OmpMemorySection />
             </>
           )}
+
+          {tab === "accounts" && <OmpAccountsSection />}
+
+          {tab === "usage" && <OmpUsagePage />}
 
           {tab === "skills" && <AgentSkillsPage />}
 

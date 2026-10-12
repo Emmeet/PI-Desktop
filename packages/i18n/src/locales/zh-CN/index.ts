@@ -231,6 +231,47 @@ export const zhCN = {
     sessionMissing: "该会话已不存在",
   },
   chat: {
+      "slashGroupOmp": "omp 命令",
+      "ompRoleNoCredential": "无凭据",
+      "ompRoleNoCredentialHint": "omp 没有该模型提供商的登录或 API 密钥，角色会回退到其他模型。请在 设置 → 智能体 → 账户 中登录。",
+      "ompSessionTotals": "会话合计",
+      "ompSessionCost": "费用",
+      "ompSessionTurns": "{{count}} 次回复 · {{tools}} 次工具调用",
+      "ompEditRevert": "撤销此编辑",
+      "ompEditReverted": "已在磁盘上撤销编辑。",
+      "ompEditRevertedShort": "已撤销",
+      "ompSubagents": {
+        "running": "子智能体：{{total}} 个中 {{count}} 个运行中",
+        "done": "子智能体：{{total}} 个已完成",
+        "meta": "{{tools}} 次工具 · {{tokens}} tokens",
+        "view": "查看",
+        "steer": "引导",
+        "cancel": "取消",
+        "send": "发送",
+        "steerPlaceholder": "发给该子智能体的消息…",
+        "steered": "已发送给 {{agent}}",
+        "transcriptTitle": "子智能体 · {{agent}}",
+        "empty": "暂无消息。",
+        "status": {
+          "pending": "等待中",
+          "running": "运行中",
+          "completed": "已完成",
+          "failed": "失败",
+          "aborted": "已取消"
+        }
+      },
+      "ompTree": {
+        "open": "分支树",
+        "title": "对话树",
+        "hint": "共 {{count}} 个分支。可从任意消息分叉到新对话继续。",
+        "fork": "从此分叉",
+        "forkHint": "打开一个从此消息继续的新对话",
+        "role": {
+          "user": "你",
+          "assistant": "智能体",
+          "system": "系统"
+        }
+      },
     tableActions: "表格操作",
     markdownPlainTextFallback: "内容较长，为保持界面响应速度，现以纯文本显示。",
     largeTextPageControls: "大段输出分页",
@@ -651,6 +692,57 @@ export const zhCN = {
     dismiss: "关闭",
   },
   settings: {
+      "ompUsage": {
+        "title": "用量",
+        "description": "所有 omp 会话的 token 与费用合计（来自 omp stats）。",
+        "since": "自 {{date}} 起",
+        "refresh": "刷新",
+        "requests": "请求",
+        "input": "输入",
+        "output": "输出",
+        "cacheRead": "缓存读取",
+        "cost": "费用",
+        "failed": "失败",
+        "byModel": "按模型",
+        "byFolder": "按项目",
+        "byAgent": "按智能体"
+      },
+      "ompAccounts": {
+        "title": "账号与订阅",
+        "description": "通过 omp 登录模型提供商，凭据保存在 omp 自己的存储中。",
+        "error": "无法加载提供商",
+        "connected": "已登录",
+        "notConnected": "未登录",
+        "unavailable": "不可用",
+        "signIn": "登录",
+        "signOut": "退出登录",
+        "addAccount": "添加账户",
+        "signedIn": "已登录 {{name}}",
+        "signedOut": "已退出 {{name}}",
+        "accountsTitle": "{{name}} 账户",
+        "noAccounts": "没有已保存的账户。",
+        "loginTitle": "登录 {{name}}",
+        "starting": "正在开始登录…",
+        "openBrowser": "在浏览器中打开此链接以继续。",
+        "openLink": "打开",
+        "pasteCode": "在此粘贴代码或重定向 URL",
+        "submit": "提交"
+      },
+      "ompMemory": {
+        "title": "记忆",
+        "description": "omp 如何跨会话记住信息。",
+        "backend": "记忆后端",
+        "backendDesc": "omp 存放长期记忆的位置。",
+        "enabled": "自动记忆",
+        "enabledDesc": "让 omp 自动提取和调取记忆。",
+        "backends": {
+          "off": "关闭",
+          "local": "本地",
+          "hindsight": "Hindsight",
+          "mnemopi": "Mnemopi",
+          "sharpshooter": "Sharpshooter"
+        }
+      },
     storage: {
       unavailableHint: "保存目录暂时不可用。请重新连接磁盘后启动；应用不会创建空白数据或切换到其他目录。",
       browserSource: "浏览器数据来源",
@@ -802,6 +894,8 @@ sklm: {
     groupSystem: "系统",
     groupExtensions: "扩展",
     nav: {
+        "accounts": "账号与订阅",
+      "usage": "用量",
       general: "常规",
       ai: "AI",
       shortcuts: "快捷键",

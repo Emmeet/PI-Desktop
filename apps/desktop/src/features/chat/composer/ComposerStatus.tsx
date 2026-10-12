@@ -79,6 +79,9 @@ export function ComposerStatus({
                 <span className="composer-queued-prompt-text" title={label}>
                   {label}
                 </span>
+                {/* omp keeps its own queue order: only send-now and remove apply. */}
+                {item.id.startsWith("ompq:") ? null : (
+                  <>
                 <TooltipButton
                   type="button"
                   className="composer-queued-prompt-action composer-queued-prompt-move-up"
@@ -101,6 +104,8 @@ export function ComposerStatus({
                 >
                   <IconArrowDown size={13} aria-hidden />
                 </TooltipButton>
+                  </>
+                )}
                 <TooltipButton
                   type="button"
                   className="composer-queued-prompt-send-now"

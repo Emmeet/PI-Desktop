@@ -1,4 +1,5 @@
 import { inheritedSessionModelBinding } from "../lib/session-model";
+import { OmpSubagentDock } from "../features/omp/OmpSubagentDock";
 import { loadCatalog as loadOmpCatalog } from "../features/chat/composer/OmpModelPicker";
 import {
   useEffect,
@@ -549,6 +550,7 @@ export function Composer({
       data-composer-dock={variant}
     >
       <div className="composer-stack">
+        {activeSessionId ? <OmpSubagentDock sessionId={activeSessionId} /> : null}
         {activeSessionId ? <TodoDock sessionId={activeSessionId} /> : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />

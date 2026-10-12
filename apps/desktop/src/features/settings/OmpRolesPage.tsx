@@ -1,3 +1,4 @@
+import "../omp/omp.css";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type OmpRole } from "../../lib/api";
@@ -10,6 +11,7 @@ import { SettingsCard, SettingsRow } from "./primitives";
 type Model = { provider: string; id: string; name: string };
 
 function ModelSelect({ value: full, models, onChange, testId }: { value: string; models: Model[]; onChange: (v: string) => void; testId: string }) {
+  const { t } = useTranslation();
   // Keep a role's ":thinking" suffix when only the model changes.
   const { model: value, thinking } = splitRoleModel(full);
   const known = models.some((m) => `${m.provider}/${m.id}` === value);
@@ -23,6 +25,11 @@ function ModelSelect({ value: full, models, onChange, testId }: { value: string;
       ))}
     </select>
     {thinking ? <span className="text-sm" data-omp-role-thinking={testId}>{thinking}</span> : null}
+    {value && !known && models.length > 0 ? (
+      <span className="omp-role-warning" data-omp-role-warning={testId} title={t("chat.ompRoleNoCredentialHint")}>
+        {t("chat.ompRoleNoCredential")}
+      </span>
+    ) : null}
     </span>
   );
 }

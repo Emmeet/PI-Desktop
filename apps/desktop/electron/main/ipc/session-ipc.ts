@@ -104,6 +104,23 @@ export type SessionIpcDependencies = {
   stripWinLongPrefix: (path: string) => string;
 };
 
+/** omp sidecar methods the renderer may call directly. */
+const OMP_RENDERER_CALLS = new Set([
+  "omp.subagents.list",
+  "omp.subagents.cancel",
+  "omp.subagents.steer",
+  "omp.subagents.messages",
+  "omp.commands",
+  "omp.tree",
+  "omp.stats",
+  "omp.login.providers",
+  "omp.login.start",
+  "omp.login.respond",
+  "omp.login.cancel",
+  "omp.logout.accounts",
+  "omp.logout",
+]);
+
 export function registerSessionIpc({
   registrar,
   getHost,
@@ -254,6 +271,15 @@ export function registerSessionIpc({
       todos: Array.isArray(input?.todos) ? input.todos : [],
     });
     return { sessionId: String(input?.sessionId ?? ""), todos: result.todos, revision: Date.now(), updatedAt: Date.now() };
+  });
+  handle(IPC.invoke.ompCall, async (input: { method?: string; params?: Record<string, unknown> } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    const method = String(input?.method ?? "");
+    if (!OMP_RENDERER_CALLS.has(method)) {
+      throw Object.assign(new Error(`omp call not allowed: ${method}`), { errorCode: "INVALID_ARGUMENT" });
+    }
+    const params = input?.params && typeof input.params === "object" ? input.params : {};
+    return sidecar.call(method, params);
   });
   handle(IPC.invoke.ompThinkingSet, async (input: { sessionId?: string; level?: string } = {}) => {
     if (!sidecar) throw new Error("agent sidecar unavailable");

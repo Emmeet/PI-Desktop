@@ -552,6 +552,31 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
 
 export type OmpRole = { id: string; name: string; builtin: boolean; model: string | null };
 
+export type OmpUsageRow = {
+  totalRequests?: number;
+  failedRequests?: number;
+  totalInputTokens?: number;
+  totalOutputTokens?: number;
+  totalCacheReadTokens?: number;
+  totalCacheWriteTokens?: number;
+  totalCost?: number;
+  avgTtft?: number;
+  avgTokensPerSecond?: number;
+  firstTimestamp?: number;
+  lastTimestamp?: number;
+  model?: string;
+  provider?: string;
+  folder?: string;
+  agentType?: string;
+};
+
+export type OmpUsageStats = {
+  overall: OmpUsageRow;
+  byModel: OmpUsageRow[];
+  byFolder: OmpUsageRow[];
+  byAgentType: OmpUsageRow[];
+};
+
 export const api = {
   getVersion: () => invoke<AppVersionInfo>(IPC.invoke.appGetVersion),
   health: () => invoke<HostHealth>(IPC.invoke.appHealth),
@@ -618,6 +643,23 @@ export const api = {
     invoke<{ enabled: boolean }>(IPC.invoke.ompPlanSet, { sessionId, enabled }),
   ompTodosSet: (sessionId: string, todos: SessionTodoSnapshot["todos"]) =>
     invoke<SessionTodoSnapshot>(IPC.invoke.ompTodosSet, { sessionId, todos }),
+  /** Allow-listed omp sidecar call (see OMP_RENDERER_CALLS in session-ipc). */
+  ompCall: <T = unknown>(method: string, params: Record<string, unknown> = {}) =>
+    invoke<T>(IPC.invoke.ompCall, { method, params }),
+  ompConfigGet: () =>
+    invoke<{ values: Record<string, unknown> }>(IPC.invoke.ompConfigGet, {}),
+  ompConfigSet: (key: string, value: unknown) =>
+    invoke<{ ok: boolean }>(IPC.invoke.ompConfigSet, { key, value }),
+  ompUsageStats: () =>
+    invoke<OmpUsageStats>(IPC.invoke.ompUsageStats, {}),
+  ompRevertEdit: (input: { path: string; oldText: string; newText: string }) =>
+    invoke<{ ok: boolean; alreadyReverted?: boolean }>(IPC.invoke.ompRevertEdit, input),
+  onOmpEvent: (listener: (event: { method: string; params: any }) => void) => {
+    if (!window.piDesktop?.on) return () => undefined;
+    return window.piDesktop.on(IPC.event.ompEvent, (payload) =>
+      listener(payload as { method: string; params: any }),
+    );
+  },
   ompSetThinking: (input: { sessionId?: string; level: string }) =>
     invoke<{ session: SessionSummary | null }>(IPC.invoke.ompThinkingSet, input),
   createSession: (input?: Partial<SessionSummary>) =>

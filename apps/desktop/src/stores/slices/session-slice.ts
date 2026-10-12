@@ -163,6 +163,7 @@ export function createSessionSlice({
   | "newSession"
   | "forkSession"
   | "forkAssistantMessage"
+  | "forkSessionAt"
   | "configureActiveSession"
   | "abortSession"
 > {
@@ -715,6 +716,22 @@ export function createSessionSlice({
       );
       commitForkedSession(result.session, {
         activate: runtime.navigationIntentIsCurrent(intent),
+      });
+    },
+
+    forkSessionAt: async (sessionId, entryId) => {
+      const intent = runtime.beginNavigationIntent();
+      const source = get().sessions.find((session) => session.id === sessionId);
+      if (!source) throw new Error(i18n.t("errors.sessionNotFound"));
+      const sourceTitle = source.title.trim() || i18n.t("chat.untitledTask");
+      const result = await api.forkSession(
+        sessionId,
+        i18n.t("nav.branchTitle", { title: sourceTitle }),
+        entryId,
+      );
+      commitForkedSession(result.session, {
+        activate: runtime.navigationIntentIsCurrent(intent),
+        clearError: true,
       });
     },
 

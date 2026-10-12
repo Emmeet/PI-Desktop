@@ -22,6 +22,8 @@ export type ComposerIpcDependencies = {
     description?: string;
   }>>;
   pluginActiveInProject: (pluginId: string, projectPath: string | null | undefined) => boolean;
+  /** omp's own slash commands for this workspace (they run inside omp). */
+  ompCommands?: (root: string | null) => Promise<ComposerCommand[]>;
   loadComposerTemplatesCached: (root: string | null) => Promise<Array<{
     name: string;
     description?: string;
@@ -42,6 +44,7 @@ export function createComposerCommandService({
   activeUserSkills,
   pluginActiveInProject,
   loadComposerTemplatesCached,
+  ompCommands,
 }: Omit<ComposerIpcDependencies, "registrar" | "optionalWorkspaceRoot">): ComposerCommandService {
   const loadComposerSkillCommands = async (
     root: string | null,
@@ -131,9 +134,11 @@ export function createComposerCommandService({
           mcpToolName: userMcpToolName(record.id, toolName),
         }))];
       });
+    const ompCatalog = ompCommands ? await ompCommands(root).catch(() => []) : [];
     const merged = new Map<string, ComposerCommand>();
     for (const command of [
       ...builtinComposerCommands(),
+      ...ompCatalog,
       ...templateCommands,
       ...pluginCommands,
       ...extensionCommands,

@@ -460,5 +460,5 @@ test("MCP OAuth subscribe is owned by a ref cleaned up on unmount", () => {
   assert.match(mcp, /useEffect\(\(\) => \{/);
   assert.match(mcp, /pendingOAuthRef\.current\?\.unsubscribe\(\)/);
   assert.match(mcp, /api\.onMcpOAuth\(/);
-  assert.match(mcpIpc, /oauth\.start\(server\.id, server\.url, server\)/);
+  assert.match(mcpIpc, /runOmpMcpOAuth\(server\.url, /);
 });

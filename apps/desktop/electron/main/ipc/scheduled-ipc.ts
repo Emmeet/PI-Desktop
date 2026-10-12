@@ -77,8 +77,8 @@ export function registerScheduledIpc({
             provider = "";
           }
         }
-        if (provider) await invoke(IPC.invoke.ompModelSet, [{ sessionId, provider, modelId }]);
-        if (level && level !== "omit") await invoke(IPC.invoke.ompThinkingSet, [{ sessionId, level }]);
+        if (provider) await invoke(IPC.invoke.ompModelSet, [{ sessionId, provider, modelId, persist: false }]);
+        if (level && level !== "omit") await invoke(IPC.invoke.ompThinkingSet, [{ sessionId, level, persist: false }]);
       }
       ompNotificationHub.scheduledRuns.set(sessionId, launch.runId);
       await invoke(IPC.invoke.agentPrompt, [{ sessionId, content: launch.prompt }]);

@@ -229,6 +229,47 @@ export const es = {
     sessionMissing: "Esa sesión ya no existe",
   },
   "chat": {
+      "slashGroupOmp": "omp commands",
+      "ompRoleNoCredential": "no credentials",
+      "ompRoleNoCredentialHint": "omp has no login or API key for this model's provider, so the role falls back to another model. Sign in under Settings → Agent → Accounts.",
+      "ompSessionTotals": "Session totals",
+      "ompSessionCost": "Cost",
+      "ompSessionTurns": "{{count}} replies · {{tools}} tool calls",
+      "ompEditRevert": "Revert this edit",
+      "ompEditReverted": "Edit reverted on disk.",
+      "ompEditRevertedShort": "Reverted",
+      "ompSubagents": {
+        "running": "Subagents: {{count}} of {{total}} running",
+        "done": "Subagents: {{total}} finished",
+        "meta": "{{tools}} tools · {{tokens}} tokens",
+        "view": "View",
+        "steer": "Steer",
+        "cancel": "Cancel",
+        "send": "Send",
+        "steerPlaceholder": "Message for this subagent…",
+        "steered": "Sent to {{agent}}",
+        "transcriptTitle": "Subagent · {{agent}}",
+        "empty": "No messages yet.",
+        "status": {
+          "pending": "pending",
+          "running": "running",
+          "completed": "done",
+          "failed": "failed",
+          "aborted": "cancelled"
+        }
+      },
+      "ompTree": {
+        "open": "Branch tree",
+        "title": "Conversation tree",
+        "hint": "{{count}} branches. Fork from any message to continue it in a new chat.",
+        "fork": "Fork here",
+        "forkHint": "Open a new chat that continues from this message",
+        "role": {
+          "user": "You",
+          "assistant": "Agent",
+          "system": "System"
+        }
+      },
     "tableActions": "Acciones de tabla",
     "markdownPlainTextFallback": "La respuesta extensa se muestra como texto sin formato para mantener la fluidez.",
     "largeTextPageControls": "Páginas de la salida extensa",
@@ -646,6 +687,57 @@ export const es = {
     "dismiss": "Descartar"
   },
   "settings": {
+      "ompUsage": {
+        "title": "Usage",
+        "description": "Token and cost totals across all omp sessions (from omp stats).",
+        "since": "Since {{date}}",
+        "refresh": "Refresh",
+        "requests": "Requests",
+        "input": "Input",
+        "output": "Output",
+        "cacheRead": "Cache read",
+        "cost": "Cost",
+        "failed": "Failed",
+        "byModel": "By model",
+        "byFolder": "By project",
+        "byAgent": "By agent"
+      },
+      "ompAccounts": {
+        "title": "Accounts & subscriptions",
+        "description": "Sign in to model providers through omp. Credentials stay in omp's own store.",
+        "error": "Could not load providers",
+        "connected": "Signed in",
+        "notConnected": "Not signed in",
+        "unavailable": "Unavailable",
+        "signIn": "Sign in",
+        "signOut": "Sign out",
+        "addAccount": "Add account",
+        "signedIn": "Signed in to {{name}}",
+        "signedOut": "Signed out of {{name}}",
+        "accountsTitle": "{{name}} accounts",
+        "noAccounts": "No stored accounts.",
+        "loginTitle": "Sign in to {{name}}",
+        "starting": "Starting sign-in…",
+        "openBrowser": "Open this link in your browser to continue.",
+        "openLink": "Open",
+        "pasteCode": "Paste the code or redirect URL here",
+        "submit": "Submit"
+      },
+      "ompMemory": {
+        "title": "Memory",
+        "description": "How omp remembers things across sessions.",
+        "backend": "Memory backend",
+        "backendDesc": "Where omp stores long-term memory.",
+        "enabled": "Automatic memories",
+        "enabledDesc": "Let omp extract and recall memories automatically.",
+        "backends": {
+          "off": "Off",
+          "local": "Local",
+          "hindsight": "Hindsight",
+          "mnemopi": "Mnemopi",
+          "sharpshooter": "Sharpshooter"
+        }
+      },
     storage: {
       unavailableHint: "El directorio de almacenamiento no está disponible. Vuelve a conectar la unidad antes de iniciar; la aplicación no creará datos vacíos ni cambiará a otro directorio.",
       browserSource: "Origen de los datos del navegador",
@@ -803,6 +895,8 @@ sklm: {
     "groupSystem": "Sistema",
     "groupExtensions": "Extensiones",
     "nav": {
+        "accounts": "Accounts",
+      "usage": "Usage",
       "general": "General",
       "ai": "AI",
       "shortcuts": "Atajos",

@@ -1,3 +1,4 @@
+import "../../features/omp/omp.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -119,6 +120,8 @@ export function AgentMcpPage() {
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
+  // The sign-in link of a running MCP OAuth flow, so it can be copied or cancelled.
+  const [pendingAuth, setPendingAuth] = useState<{ serverName: string; url: string; loginId: string | null } | null>(null);
   const pendingOAuthRef = useRef<{ unsubscribe: () => void } | null>(null);
 
   useEffect(() => {
@@ -279,13 +282,16 @@ export function AgentMcpPage() {
     const cleanup = () => {
       finish();
       setAuthorizingId(null);
+      setPendingAuth(null);
     };
 
     unsubscribe = api.onMcpOAuth((event) => {
       if (activeLoginId && event.loginId !== activeLoginId) return;
       if (event.serverId !== server.id) return;
 
-      if (event.kind === "done") {
+      if (event.kind === "authUrl") {
+        setPendingAuth({ serverName: server.label, url: event.url, loginId: event.loginId ?? activeLoginId });
+      } else if (event.kind === "done") {
         setStatuses((current) => [
           ...current.filter((status) => status.serverId !== server.id),
           event.status,
@@ -632,6 +638,28 @@ export function AgentMcpPage() {
   }
 
   return (
+    <>
+    {pendingAuth ? (
+      <div className="omp-mcp-auth" role="status" data-mcp-oauth-pending="true">
+        <strong>{t("extensions.mcp.authorizing")} · {pendingAuth.serverName}</strong>
+        <code className="omp-login-link" title={pendingAuth.url}>{pendingAuth.url}</code>
+        <div className="omp-login-row">
+          <button type="button" className="omp-mini-btn" onClick={() => window.open(pendingAuth.url, "_blank", "noopener")}>
+            {t("settings.ompAccounts.openLink")}
+          </button>
+          <button type="button" className="omp-mini-btn" onClick={() => void navigator.clipboard?.writeText(pendingAuth.url)}>
+            {t("chat.copy")}
+          </button>
+          <button
+            type="button"
+            className="omp-mini-btn"
+            onClick={() => void api.cancelMcpOAuth(pendingAuth.loginId ? { loginId: pendingAuth.loginId } : {}).finally(() => { setPendingAuth(null); setAuthorizingId(null); pendingOAuthRef.current?.unsubscribe(); pendingOAuthRef.current = null; })}
+          >
+            {t("common.cancel")}
+          </button>
+        </div>
+      </div>
+    ) : null}
     <AgentCapabilityPage
       toolbar={
         <CapabilityToolbar
@@ -760,5 +788,6 @@ export function AgentMcpPage() {
         />
       ) : null}
     </AgentCapabilityPage>
+    </>
   );
 }

@@ -12,11 +12,11 @@ const search = await readFile(
 const settingsPage = await readSettingsSource();
 const api = await readFile(new URL("../src/lib/api.ts", import.meta.url), "utf8");
 
-test("settings has no usage destination; host token history stays available", () => {
-  assert.doesNotMatch(search, /id: "usage"/);
-  assert.doesNotMatch(search, /settings\.nav\.usage/);
+test("settings usage destination is omp's own stats page; host token history stays available", () => {
+  assert.match(search, /id: "usage"/);
+  assert.match(search, /settings\.nav\.usage/);
   assert.doesNotMatch(settingsPage, /TokenUsagePage/);
-  assert.doesNotMatch(settingsPage, /tab === "usage"/);
+  assert.match(settingsPage, /OmpUsagePage/);
   assert.match(api, /getTokenUsageHistory/);
 });
 

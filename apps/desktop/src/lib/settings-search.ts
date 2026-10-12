@@ -18,6 +18,8 @@ export type SettingsTabId =
   | "sync"
   | "remoteHosts"
   | "voice"
+  | "accounts"
+  | "usage"
   | "about";
 
 export type SettingsNavGroupId =
@@ -306,6 +308,20 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
       "settings.remoteHosts.statusOffline",
       "settings.remoteHosts.experimental",
     ],
+  },
+  {
+    id: "accounts",
+    labelKey: "settings.nav.accounts",
+    titleKey: "settings.ompAccounts.title",
+    group: "agent",
+    keywordKeys: ["settings.ompAccounts.signIn", "settings.ompAccounts.description"],
+  },
+  {
+    id: "usage",
+    labelKey: "settings.nav.usage",
+    titleKey: "settings.ompUsage.title",
+    group: "system",
+    keywordKeys: ["settings.ompUsage.byModel", "settings.ompUsage.cost"],
   },
   {
     id: "about",

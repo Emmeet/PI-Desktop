@@ -209,6 +209,8 @@ export type AppState = {
   newSession: (options?: { projectPath?: string | null }) => Promise<void>;
   forkSession: (id: string) => Promise<void>;
   forkAssistantMessage: (messageId: string) => Promise<void>;
+  /** Fork an omp chat at any entry of its branch tree (throws on failure). */
+  forkSessionAt: (sessionId: string, entryId: string) => Promise<void>;
   configureActiveSession: (config: {
     mode: Mode;
     providerId?: string;

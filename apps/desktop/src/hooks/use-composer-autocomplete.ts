@@ -44,6 +44,7 @@ let filesCache: {
 const COMMAND_GROUP_ORDER = {
   template: 0,
   builtin: 1,
+  omp: 1.5,
   plugin: 2,
   extension: 3,
   mcp: 4,

@@ -21,7 +21,7 @@
  */
 import { resolveOmpBinary } from "@pi-desktop/agent-runtime/omp-binary";
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { McpServerRecord, UserSkillRecord, UserSubagentRecord } from "@pi-desktop/shared";
@@ -62,17 +62,48 @@ function winQuote(arg: string): string {
   return /^[\w@%+=:,./\\-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '""')}"`;
 }
 
-export function runOmpConfig(args: string[]): Promise<string> {
+/** Run one omp CLI command and return stdout. */
+export function runOmp(args: string[], options: { timeoutMs?: number; maxBuffer?: number } = {}): Promise<string> {
   const binary = ompBinary();
   const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(binary);
   const command = shim ? `"${binary}"` : binary;
-  const argv = shim ? ["config", ...args].map(winQuote) : ["config", ...args];
+  const argv = shim ? args.map(winQuote) : args;
   return new Promise((resolve, reject) => {
-    execFile(command, argv, { timeout: 20_000, maxBuffer: 1 << 20, windowsHide: true, ...(shim ? { shell: true } : {}) }, (err, stdout, stderr) => {
-      if (err) reject(new Error(`omp config ${args[0]} failed: ${String(stderr || err.message).trim().slice(0, 300)}`));
+    execFile(command, argv, { timeout: options.timeoutMs ?? 20_000, maxBuffer: options.maxBuffer ?? 1 << 20, windowsHide: true, ...(shim ? { shell: true } : {}) }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`omp ${args.slice(0, 2).join(" ")} failed: ${String(stderr || err.message).trim().slice(0, 300)}`));
       else resolve(stdout);
     });
   });
+}
+
+export function runOmpConfig(args: string[]): Promise<string> {
+  return runOmp(["config", ...args]);
+}
+
+/** omp's install directory (its TypeScript sources ship with it), or null. */
+export function ompPackageDir(): string | null {
+  const candidates: string[] = [];
+  try {
+    const real = realpathSync(ompBinary());
+    // <pkg>/dist/cli.js (bun global symlink) → <pkg>
+    candidates.push(dirname(dirname(real)));
+  } catch { /* not found */ }
+  const bunRoot = process.env.BUN_INSTALL || join(homedir(), ".bun");
+  candidates.push(join(bunRoot, "install", "global", "node_modules", "@oh-my-pi", "pi-coding-agent"));
+  if (process.env.APPDATA) candidates.push(join(process.env.APPDATA, "npm", "node_modules", "@oh-my-pi", "pi-coding-agent"));
+  return candidates.find((dir) => existsSync(join(dir, "src", "mcp", "oauth-flow.ts"))) ?? null;
+}
+
+/** The bun runtime omp itself runs on. */
+export function bunBinary(): string {
+  const bunRoot = process.env.BUN_INSTALL || join(homedir(), ".bun");
+  const exe = process.platform === "win32" ? "bun.exe" : "bun";
+  const local = join(bunRoot, "bin", exe);
+  if (existsSync(local)) return local;
+  for (const dir of (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")) {
+    if (dir && existsSync(join(dir, exe))) return join(dir, exe);
+  }
+  return exe;
 }
 
 function readJson<T>(path: string, fallback: T): T {
@@ -282,6 +313,7 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   const globalSkillIds = new Set(globalSkills.map((skill) => skill.id));
   next.userSkills = syncSkillDir(join(agentDir, "skills"), globalSkills, previous.userSkills);
   const skillProjects = new Set([...projects, ...Object.keys(previous.projectSkills)]);
+  const globalHiddenIn = new Map<string, string[]>();
   for (const project of skillProjects) {
     const active = isDirectory(project)
       ? ((await host.call<{ skills?: UserSkillRecord[] }>("skills.active", { projectPath: project }).catch(() => ({ skills: [] }))).skills ?? [])
@@ -289,6 +321,13 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
     const only = active.filter((skill) => !nativeProjectSkill(skill) && !globalSkillIds.has(skill.id));
     const ids = syncSkillDir(join(project, ".omp", "skills"), only, previous.projectSkills[project] ?? []);
     if (ids.length) next.projectSkills[project] = ids;
+    // A global skill switched off for this project is still mirrored globally;
+    // hide it here through the project's ignore list below.
+    if (isDirectory(project)) {
+      const activeIds = new Set(active.map((skill) => skill.id));
+      const hidden = globalSkills.filter((skill) => !activeIds.has(skill.id)).map((skill) => skill.name);
+      if (hidden.length) globalHiddenIn.set(project, hidden);
+    }
   }
   // A switched-off project-level folder skill is hidden in that project only,
   // through the project's own omp settings (`<project>/.omp/settings.json`).
@@ -308,12 +347,15 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   }
   next.ignoredSkills = [];
   next.projectIgnored = {};
-  const ignoreProjects = new Set([...projects, ...Object.keys(previous.projectIgnored ?? {})]);
+  const ignoreProjects = new Set([...projects, ...Object.keys(previous.projectIgnored ?? {}), ...globalHiddenIn.keys()]);
   for (const project of ignoreProjects) {
     const listedHere = isDirectory(project)
       ? ((await host.call<{ skills?: UserSkillRecord[] }>("skills.list", { level: "project", projectPath: project }).catch(() => ({ skills: [] }))).skills ?? [])
       : [];
-    const off = [...new Set(listedHere.filter((skill) => !skill.enabled && nativeProjectSkill(skill)).map((skill) => skill.name))].sort();
+    const off = [...new Set([
+      ...listedHere.filter((skill) => !skill.enabled && nativeProjectSkill(skill)).map((skill) => skill.name),
+      ...(globalHiddenIn.get(project) ?? []),
+    ])].sort();
     const had = previous.projectIgnored?.[project];
     if (!off.length && !had) continue;
     const path = join(project, ".omp", "settings.json");

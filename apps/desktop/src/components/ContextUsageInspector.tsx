@@ -1,3 +1,4 @@
+import { OmpSessionTotals } from "../features/omp/OmpSessionTotals";
 import {
   useCallback,
   useEffect,
@@ -419,6 +420,9 @@ export function ContextUsageInspector({
           </span>
         </div>
       </div>
+      {canCompact && open && sessionId ? (
+        <OmpSessionTotals sessionId={sessionId} refreshKey={sessionMessages.length} />
+      ) : null}
       {canCompact ? (
         <div className="context-inspector-actions">
           <button

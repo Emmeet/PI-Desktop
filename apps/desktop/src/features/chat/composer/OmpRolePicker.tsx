@@ -1,3 +1,4 @@
+import "../../omp/omp.css";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../../stores/app-store";
@@ -6,7 +7,7 @@ import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { IconCheck, IconChevronDown } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { api, type OmpRole } from "../../../lib/api";
-import { OMP_MODEL_EVENT } from "./OmpModelPicker";
+import { OMP_MODEL_EVENT, loadCatalog } from "./OmpModelPicker";
 
 const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max)$/;
 
@@ -56,6 +57,12 @@ export function OmpRolePicker({
   }, []);
   useEffect(() => { refresh(false); }, [refresh]);
   useEffect(() => { if (open) refresh(true); }, [open, refresh]);
+  // omp only lists models it has credentials for; a role pointing elsewhere silently falls back.
+  const [usable, setUsable] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    loadCatalog(false).then((c) => setUsable(new Set(c.models.map((m) => `${m.provider}/${m.id}`)))).catch(() => undefined);
+  }, [open]);
 
   const roleSessionId = session?.id;
   useEffect(() => { setCurrent(null); }, [roleSessionId]);
@@ -136,6 +143,11 @@ export function OmpRolePicker({
                 <span className="composer-model-option-main">
                   <span className="composer-model-label">{role.id}</span>
                   <span className="composer-model-option-meta">{role.model}</span>
+                  {usable && usable.size > 0 && role.model && !usable.has(splitRoleModel(role.model).model) ? (
+                    <span className="omp-role-warning" data-omp-role-warning={role.id} title={t("chat.ompRoleNoCredentialHint")}>
+                      {t("chat.ompRoleNoCredential")}
+                    </span>
+                  ) : null}
                 </span>
                 {active ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
               </button>

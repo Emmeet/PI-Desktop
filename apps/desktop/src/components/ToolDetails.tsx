@@ -1,4 +1,7 @@
+import "../features/omp/omp.css";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { api } from "../lib/api";
 import { HighlightedCode, useCopy } from "./Markdown";
 import { LargeTextPreview } from "./LargeTextPreview";
 import { IconCheck, IconCircleAlert, IconCopy, IconInfo } from "./icons";
@@ -56,7 +59,39 @@ function blockCopyText(block: ToolBlock): string {
       return block.rows.map((row) => `${row.label}: ${row.value}`).join("\n");
     case "note":
       return block.code ? `${block.code}: ${block.text}` : block.text;
+    case "images":
+      return block.images.map((image) => image.mimeType).join("\n");
   }
+}
+
+/** Undo one omp edit: puts the old text back while the file still has the edit. */
+function RevertEditButton({ revert }: { revert: { path: string; oldText: string; newText: string } }) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <div className="tool-diff-actions">
+      <button
+        type="button"
+        className="tool-diff-revert"
+        disabled={state === "busy" || state === "done"}
+        onClick={async () => {
+          setState("busy");
+          try {
+            await api.ompRevertEdit(revert);
+            setState("done");
+            setMessage(t("chat.ompEditReverted"));
+          } catch (error) {
+            setState("error");
+            setMessage(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, "") : String(error));
+          }
+        }}
+      >
+        {state === "done" ? t("chat.ompEditRevertedShort") : t("chat.ompEditRevert")}
+      </button>
+      {message ? <span className={cx("tool-diff-revert-note", state === "error" && "is-error")}>{message}</span> : null}
+    </div>
+  );
 }
 
 function BlockHead({ label, copy }: { label: string; copy: string }) {
@@ -235,6 +270,17 @@ function BlockBody({ block, streaming }: { block: ToolBlock; streaming: boolean 
             ))}
           </div>
           <MoreNote hidden={block.hidden} />
+          {block.revert ? <RevertEditButton revert={block.revert} /> : null}
+        </div>
+      );
+    case "images":
+      return (
+        <div className="tool-images">
+          {block.images.map((image, index) => (
+            <a key={index} href={image.src} target="_blank" rel="noreferrer" className="tool-image-link">
+              <img className="tool-image" src={image.src} alt="" loading="lazy" />
+            </a>
+          ))}
         </div>
       );
     case "files":

@@ -24,6 +24,7 @@ import { registerJevIpc } from "./jev-ipc";
 import { registerProviderIpc } from "./provider-ipc";
 import { registerScheduledIpc } from "./scheduled-ipc";
 import { registerSessionIpc } from "./session-ipc";
+import { ompComposerCommands, registerOmpExtrasIpc } from "./omp-extras-ipc";
 import { registerSettingsIpc } from "./settings-ipc";
 import { registerStorageIpc } from "../storage/ipc";
 import { registerConfigSyncIpc } from "./config-sync-ipc";
@@ -280,6 +281,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     acquireSessionOperation,
     stripWinLongPrefix,
   });
+  registerOmpExtrasIpc({ registrar, getSidecar });
   registerSettingsIpc({
     registrar,
     getHost,
@@ -327,6 +329,15 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     activeUserSkills,
     pluginActiveInProject,
     loadComposerTemplatesCached,
+    ompCommands: async (root) => {
+      const sidecar = getSidecar();
+      if (!sidecar) return [];
+      const { commands } = await sidecar.call<{ commands: Array<{ name: string; description?: string; input?: { hint?: string }; source?: string }> }>(
+        "omp.commands",
+        root ? { cwd: root } : {},
+      );
+      return ompComposerCommands(commands);
+    },
   });
   registerWindowIpc({
     setTraySessionPreferences: traySessions.setPreferences,

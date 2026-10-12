@@ -450,6 +450,7 @@ async function handle(method: string, params: any): Promise<unknown> {
         sessionId: typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined,
         provider: String(params.provider ?? ""),
         modelId: String(params.modelId ?? ""),
+        ...(params.persist === false ? { persist: false } : {}),
       });
       return { session };
     }
@@ -519,6 +520,45 @@ async function handle(method: string, params: any): Promise<unknown> {
       const onEvent = (envelope: AgentEventEnvelope) => notify("native.agent.event", envelope);
       return (await loadOmp()).ompSessionService().compact(String(params.sessionId ?? ""), onEvent);
     }
+    case "omp.subagents.list":
+      return { subagents: (await loadOmp()).ompSessionService().subagents(String(params.sessionId ?? "")) };
+    case "omp.subagents.cancel":
+      return { cancelled: await (await loadOmp()).ompSessionService().cancelSubagent(String(params.sessionId ?? ""), String(params.subagentId ?? "")) };
+    case "omp.subagents.steer":
+      await (await loadOmp()).ompSessionService().steerSubagent(String(params.sessionId ?? ""), String(params.subagentId ?? ""), String(params.message ?? ""));
+      return { ok: true };
+    case "omp.subagents.messages":
+      return {
+        messages: await (await loadOmp()).ompSessionService().subagentMessages(
+          String(params.sessionId ?? ""),
+          String(params.subagentId ?? ""),
+          typeof params.sessionFile === "string" ? params.sessionFile : undefined,
+        ),
+      };
+    case "omp.commands":
+      return {
+        commands: await (await loadOmp()).ompSessionService().availableCommands({
+          ...(typeof params.sessionId === "string" ? { sessionId: params.sessionId } : {}),
+          ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
+        }),
+      };
+    case "omp.tree":
+      return (await loadOmp()).ompSessionService().tree(String(params.sessionId ?? ""));
+    case "omp.stats":
+      return { stats: await (await loadOmp()).ompSessionService().sessionStats(String(params.sessionId ?? "")) };
+    case "omp.login.providers":
+      return { providers: await (await loadOmp()).ompSessionService().loginProviders() };
+    case "omp.login.start":
+      return (await loadOmp()).ompSessionService().login(String(params.providerId ?? ""));
+    case "omp.login.respond":
+      return { ok: (await loadOmp()).ompSessionService().loginRespond(String(params.requestId ?? ""), typeof params.value === "string" ? params.value : null) };
+    case "omp.login.cancel":
+      (await loadOmp()).ompSessionService().cancelLogin();
+      return { ok: true };
+    case "omp.logout.accounts":
+      return { accounts: await (await loadOmp()).ompSessionService().logoutAccounts(String(params.providerId ?? "")) };
+    case "omp.logout":
+      return (await loadOmp()).ompSessionService().logout(String(params.providerId ?? ""), Number(params.credentialId));
     case "omp.todos.get": {
       const sessionId = String(params.sessionId ?? "");
       return { todos: await (await loadOmp()).ompSessionService().todos(sessionId) };
@@ -542,6 +582,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       const session = await (await loadOmp()).ompSessionService().setThinkingLevel({
         sessionId: typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined,
         level: String(params.level ?? ""),
+        ...(params.persist === false ? { persist: false } : {}),
       });
       return { session };
     }

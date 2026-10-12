@@ -30,6 +30,41 @@ import {
 import { OmpRpcProcess, type OmpFrame } from "./rpc-process.js";
 import { listOmpSessionFiles, parseOmpSession, projectMessage, textOf, type OmpSessionFile } from "./session-store.js";
 
+export type OmpSubagentView = {
+  id: string;
+  index: number;
+  agent: string;
+  status: "pending" | "running" | "completed" | "failed" | "aborted";
+  task?: string;
+  description?: string;
+  intent?: string;
+  currentTool?: string;
+  toolCount?: number;
+  tokens?: number;
+  recentOutput?: string[];
+  sessionFile?: string;
+  parentToolCallId?: string;
+  updatedAt: number;
+};
+
+export type OmpSlashCommand = {
+  name: string;
+  aliases?: string[];
+  description?: string;
+  input?: { hint?: string };
+  source: string;
+};
+
+export type OmpTreeNode = {
+  id: string;
+  parentId: string | null;
+  role: "user" | "assistant" | "tool" | "system" | "other";
+  preview: string;
+  timestamp?: string;
+  onPath: boolean;
+  children: OmpTreeNode[];
+};
+
 export type OmpPromptAttachment = { path: string; name?: string; kind: "image" | "file"; mimeType?: string };
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -215,6 +250,8 @@ class OmpSessionRuntime {
   private compactionReason?: ContextCompactionReason;
   side: OmpSideChannel = () => undefined;
   sessionFile?: string;
+  private readonly subagents = new Map<string, OmpSubagentView>();
+  private commands?: OmpSlashCommand[];
 
   private constructor(
     readonly id: string,
@@ -270,6 +307,8 @@ class OmpSessionRuntime {
       // Route omp's ask tool to the desktop's ask card.
       // omp handles stdin in order, so this lands before the first prompt.
       void rpc.request({ type: "set_ask_dialog", enabled: true }).catch(() => undefined);
+      // Live subagent lifecycle + aggregated progress (not every inner event).
+      void rpc.request({ type: "set_subagent_subscription", level: "progress" }).catch(() => undefined);
       await runtime.refreshSessionFile();
     } catch (error) {
       rpc.dispose();
@@ -418,6 +457,76 @@ class OmpSessionRuntime {
       this.compactionReason = undefined;
       this.emitStatus();
     }
+  }
+
+  subagentList(): OmpSubagentView[] {
+    return [...this.subagents.values()].sort((a, b) => a.index - b.index);
+  }
+
+  async cancelSubagent(subagentId: string): Promise<boolean> {
+    const result = await this.rpc.request<{ cancelled?: boolean }>({ type: "cancel_subagent", subagentId });
+    return result?.cancelled === true;
+  }
+
+  async steerSubagent(subagentId: string, message: string): Promise<void> {
+    await this.rpc.request({ type: "steer_subagent", subagentId, message });
+  }
+
+  async availableCommands(): Promise<OmpSlashCommand[]> {
+    if (this.commands) return this.commands;
+    const result = await this.rpc.request<{ commands?: OmpSlashCommand[] }>({ type: "get_available_commands" });
+    this.commands = Array.isArray(result?.commands) ? result.commands : [];
+    return this.commands;
+  }
+
+  private applySubagent(id: string, patch: Partial<OmpSubagentView> & { index?: number; agent?: string }): void {
+    const previous = this.subagents.get(id);
+    const next: OmpSubagentView = {
+      id,
+      index: patch.index ?? previous?.index ?? 0,
+      agent: patch.agent ?? previous?.agent ?? "task",
+      status: patch.status ?? previous?.status ?? "running",
+      ...(previous ?? {}),
+      ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+      updatedAt: Date.now(),
+    } as OmpSubagentView;
+    this.subagents.set(id, next);
+    this.side("native.subagents.changed", { sessionId: this.id, subagents: this.subagentList() });
+  }
+
+  private onSubagentFrame(frame: OmpFrame): void {
+    const payload = frame.payload ?? {};
+    if (frame.type === "subagent_lifecycle") {
+      const id = String(payload.id ?? "");
+      if (!id) return;
+      const status = payload.status === "started" ? "running" : String(payload.status ?? "running");
+      this.applySubagent(id, {
+        index: Number(payload.index) || 0,
+        agent: String(payload.agent ?? "task"),
+        status: status as OmpSubagentView["status"],
+        ...(payload.description ? { description: String(payload.description) } : {}),
+        ...(payload.sessionFile ? { sessionFile: String(payload.sessionFile) } : {}),
+        ...(payload.parentToolCallId ? { parentToolCallId: String(payload.parentToolCallId) } : {}),
+      });
+      return;
+    }
+    const progress = payload.progress ?? {};
+    const id = String(progress.id ?? "");
+    if (!id) return;
+    this.applySubagent(id, {
+      index: Number(payload.index ?? progress.index) || 0,
+      agent: String(payload.agent ?? progress.agent ?? "task"),
+      ...(typeof progress.status === "string" ? { status: progress.status as OmpSubagentView["status"] } : {}),
+      task: String(payload.task ?? progress.task ?? ""),
+      ...(progress.description ? { description: String(progress.description) } : {}),
+      ...(progress.lastIntent ? { intent: String(progress.lastIntent) } : {}),
+      currentTool: typeof progress.currentTool === "string" ? progress.currentTool : "",
+      toolCount: Number(progress.toolCount) || 0,
+      tokens: Number(progress.tokens) || 0,
+      ...(Array.isArray(progress.recentOutput) ? { recentOutput: progress.recentOutput.slice(-3).map(String) } : {}),
+      ...(payload.sessionFile ? { sessionFile: String(payload.sessionFile) } : {}),
+      ...(payload.parentToolCallId ? { parentToolCallId: String(payload.parentToolCallId) } : {}),
+    });
   }
 
   pendingInteractive(): { asks: AskToolRequest[]; permissions: ToolPermissionRequest[] } {
@@ -638,7 +747,27 @@ class OmpSessionRuntime {
         if (frame.id === this.promptRequestId && frame.success === false) {
           this.emit({ type: "error", error: { code: "OMP_PROMPT_REJECTED", message: String(frame.error ?? "prompt rejected"), retriable: false } });
           this.finish();
+        } else if (frame.id === this.promptRequestId && frame.success === true && frame.data?.agentInvoked === false) {
+          // A slash command omp ran locally: no agent turn and no prompt_result follows.
+          this.finish();
         }
+        return;
+      }
+      case "command_output": {
+        const text = stripAnsi(String(frame.text ?? "")).trimEnd();
+        if (!text) return;
+        if (!this.turnId) {
+          this.side("native.notice", { sessionId: this.id, level: "info", message: text.slice(0, 400) });
+          return;
+        }
+        const message: UiMessage = {
+          id: `omp-command:${randomUUID()}`,
+          role: "assistant",
+          content: "```text\n" + text.replace(/```/g, "ʼʼʼ") + "\n```",
+          createdAt: new Date().toISOString(),
+          status: "complete",
+        };
+        this.emit({ type: "message_end", message });
         return;
       }
       case "extension_ui_request":
@@ -699,6 +828,14 @@ class OmpSessionRuntime {
         return;
       case "todo_auto_clear":
         this.emitTodos([]);
+        return;
+      case "subagent_lifecycle":
+      case "subagent_progress":
+        this.onSubagentFrame(frame);
+        return;
+      case "available_commands_update":
+        this.commands = Array.isArray(frame.commands) ? frame.commands : [];
+        this.side("native.commands.changed", { sessionId: this.id });
         return;
     }
     if (!this.turnId) return;
@@ -896,6 +1033,18 @@ export class OmpSessionService {
     }
   }
 
+  /** Fork point: a message on the shown branch, or any entry of the file's tree (branch view). */
+  private resolveForkEntry(record: SessionRecord, messageId: string): string {
+    try {
+      return this.resolveEntryId(record, messageId);
+    } catch (error) {
+      if (record.path && existsSync(record.path) && readFileSync(record.path, "utf8").includes(`"id":${JSON.stringify(messageId)}`)) {
+        return messageId;
+      }
+      throw error;
+    }
+  }
+
   private resolveEntryId(record: SessionRecord, messageId: string): string {
     const aliased = this.aliases.get(messageId);
     if (aliased) return aliased;
@@ -1009,11 +1158,12 @@ export class OmpSessionService {
   }
 
   /** Choose the model for a session (or, without one, for new chats); remembered across restarts. */
-  async setModel(input: { sessionId?: string; provider: string; modelId: string }): Promise<SessionSummary | null> {
+  async setModel(input: { sessionId?: string; provider: string; modelId: string; persist?: boolean }): Promise<SessionSummary | null> {
     // Role values look like "provider/model:high"; the level is not part of the model id.
     const suffix = /:(off|minimal|low|medium|high|xhigh|max)$/.exec(input.modelId);
     const model = { provider: input.provider, modelId: suffix ? input.modelId.slice(0, suffix.index) : input.modelId };
-    this.savePrefs({ model });
+    // Scheduled runs pin a model per session without changing the user's default.
+    if (input.persist !== false || !input.sessionId) this.savePrefs({ model });
     if (!input.sessionId) { this.pendingNew = { ...this.pendingNew, model }; return null; }
     const record = this.record(input.sessionId);
     const runtime = this.runtimes.get(record.id);
@@ -1048,11 +1198,11 @@ export class OmpSessionService {
     return result;
   }
 
-  async setThinkingLevel(input: { sessionId?: string; level: string }): Promise<SessionSummary | null> {
+  async setThinkingLevel(input: { sessionId?: string; level: string; persist?: boolean }): Promise<SessionSummary | null> {
     if (!(OMP_THINKING_LEVELS as readonly string[]).includes(input.level)) {
       throw Object.assign(new Error(`Unsupported thinking level: ${input.level}`), { errorCode: "INVALID_ARGUMENT" });
     }
-    this.savePrefs({ thinkingLevel: input.level });
+    if (input.persist !== false || !input.sessionId) this.savePrefs({ thinkingLevel: input.level });
     if (!input.sessionId) { this.pendingNew = { ...this.pendingNew, thinking: input.level }; return null; }
     const record = this.record(input.sessionId);
     const runtime = this.runtimes.get(record.id);
@@ -1220,7 +1370,7 @@ export class OmpSessionService {
   /** Fork with omp's own `fork` command; the original session is untouched. */
   async fork(input: { id: string; title?: string; throughMessageId?: string }): Promise<SessionDetail> {
     const record = this.record(input.id);
-    const entryId = input.throughMessageId ? this.resolveEntryId(record, input.throughMessageId) : undefined;
+    const entryId = input.throughMessageId ? this.resolveForkEntry(record, input.throughMessageId) : undefined;
     const newPath = await this.withSessionProcess(record, async (rpc) => {
       const result = await rpc.request<{ cancelled?: boolean }>({ type: "fork", ...(entryId ? { entryId } : {}) });
       if (result?.cancelled) throw Object.assign(new Error("omp cancelled the fork"), { errorCode: "OMP_FORK_CANCELLED" });
@@ -1473,6 +1623,198 @@ export class OmpSessionService {
     return next;
   }
 
+  // ---- Subagents -------------------------------------------------------
+  subagents(id: string): OmpSubagentView[] {
+    return this.runtimes.get(id)?.subagentList() ?? [];
+  }
+
+  /** Subagents outlive the parent turn (async task), so only the process must be alive. */
+  private subagentRuntime(id: string): OmpSessionRuntime {
+    const runtime = this.runtimes.get(id);
+    if (!runtime?.alive) throw Object.assign(new Error("This omp session is not running"), { errorCode: "TURN_NOT_FOUND" });
+    return runtime;
+  }
+
+  async cancelSubagent(id: string, subagentId: string): Promise<boolean> {
+    return this.subagentRuntime(id).cancelSubagent(subagentId);
+  }
+
+  async steerSubagent(id: string, subagentId: string, message: string): Promise<void> {
+    if (!message.trim()) throw Object.assign(new Error("Message is empty"), { errorCode: "INVALID_ARGUMENT" });
+    await this.subagentRuntime(id).steerSubagent(subagentId, message.trim());
+  }
+
+  /** A subagent's own transcript: live from omp, else from its session file. */
+  async subagentMessages(id: string, subagentId: string, sessionFile?: string): Promise<UiMessage[]> {
+    const runtime = this.runtimes.get(id);
+    let raw: any[] | undefined;
+    if (runtime?.alive) {
+      const result = await runtime
+        .request<{ messages?: any[] }>({ type: "get_subagent_messages", subagentId, ...(sessionFile ? { sessionFile } : {}) })
+        .catch(() => undefined);
+      raw = result?.messages;
+    }
+    if (raw) {
+      const args = new Map<string, unknown>();
+      return raw.flatMap((message, index) => {
+        const projected = projectMessage(`${subagentId}:${index}`, new Date().toISOString(), message, args);
+        return projected ? [projected] : [];
+      });
+    }
+    const known = runtime?.subagentList().find((agent) => agent.id === subagentId)?.sessionFile;
+    const file = sessionFile ?? known;
+    if (!file || !existsSync(file)) {
+      throw Object.assign(new Error("This subagent's transcript is not available"), { errorCode: "NOT_FOUND" });
+    }
+    return parseOmpSession(file)?.messages ?? [];
+  }
+
+  // ---- Slash commands ----------------------------------------------------
+  /** omp's slash commands (builtins that work over RPC, skills, prompt templates, extensions). */
+  async availableCommands(input: { sessionId?: string; cwd?: string }): Promise<OmpSlashCommand[]> {
+    const runtime = input.sessionId ? this.runtimes.get(input.sessionId) : undefined;
+    if (runtime?.alive) return runtime.availableCommands();
+    const cwd = input.cwd && existsSync(input.cwd) ? input.cwd : homedir();
+    const cached = this.commandCache.get(cwd);
+    if (cached && Date.now() - cached.at < 60_000) return cached.commands;
+    const result = await this.utility(cwd).request<{ commands?: OmpSlashCommand[] }>({ type: "get_available_commands" });
+    const commands = Array.isArray(result?.commands) ? result.commands : [];
+    this.commandCache.set(cwd, { at: Date.now(), commands });
+    return commands;
+  }
+
+  private readonly commandCache = new Map<string, { at: number; commands: OmpSlashCommand[] }>();
+
+  // ---- Session tree / stats ---------------------------------------------
+  private async sessionRequest<T>(id: string, command: Record<string, unknown> & { type: string }): Promise<T> {
+    const runtime = this.runtimes.get(id);
+    if (runtime?.alive) return runtime.request<T>(command);
+    return this.withSessionProcess(this.record(id), (rpc) => rpc.request<T>(command));
+  }
+
+  async tree(id: string): Promise<{ nodes: OmpTreeNode[]; leafId: string | null }> {
+    const result = await this.sessionRequest<{ tree?: any[]; leafId?: string | null }>(id, { type: "get_tree" });
+    const leafId = result?.leafId ?? null;
+    const raw = Array.isArray(result?.tree) ? result.tree : [];
+    const parents = new Map<string, string | null>();
+    const walk = (node: any) => {
+      parents.set(String(node?.entry?.id ?? ""), node?.entry?.parentId ?? null);
+      for (const child of node?.children ?? []) walk(child);
+    };
+    raw.forEach(walk);
+    const onPath = new Set<string>();
+    for (let at: string | null | undefined = leafId; at; at = parents.get(at)) onPath.add(at);
+    return { nodes: raw.flatMap((node) => ompTreeNodes(node, null, onPath)), leafId };
+  }
+
+  async sessionStats(id: string): Promise<Record<string, unknown>> {
+    return this.sessionRequest<Record<string, unknown>>(id, { type: "get_session_stats" });
+  }
+
+  // ---- Utility process (login, commands without a chat) ------------------
+  private utilityProcess?: { rpc: OmpRpcProcess; cwd: string; timer?: NodeJS.Timeout };
+  private readonly loginUi = new Map<string, string>();
+
+  private utility(cwd = homedir()): OmpRpcProcess {
+    const current = this.utilityProcess;
+    if (current?.rpc.isAlive && current.cwd === cwd) {
+      this.touchUtility();
+      return current.rpc;
+    }
+    current?.rpc.dispose();
+    const env = { ...process.env };
+    if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = this.agentDir;
+    const rpc = new OmpRpcProcess(resolveOmpBinary(), ["--cwd", cwd, "--no-session", "--no-title"], { cwd, env, mode: "rpc-ui" });
+    rpc.onFrame((frame) => {
+      if (frame.type !== "extension_ui_request") return;
+      const requestId = String(frame.id ?? "");
+      if (frame.method === "open_url") {
+        this.side("native.login.ui", { kind: "open_url", url: String(frame.url ?? ""), ...(frame.instructions ? { instructions: String(frame.instructions) } : {}) });
+      } else if (frame.method === "notify") {
+        this.side("native.login.ui", { kind: "progress", message: String(frame.message ?? "") });
+      } else if (frame.method === "input" || frame.method === "editor") {
+        this.loginUi.set(requestId, String(frame.method));
+        this.side("native.login.ui", { kind: "input", requestId, title: String(frame.title ?? ""), ...(frame.placeholder ? { placeholder: String(frame.placeholder) } : {}) });
+      } else if (frame.method === "select" || frame.method === "confirm") {
+        // Login never needs these; answer so omp does not wait forever.
+        try { rpc.send({ type: "extension_ui_response", id: requestId, cancelled: true }); } catch { /* gone */ }
+      }
+    });
+    rpc.onExit(() => {
+      if (this.utilityProcess?.rpc === rpc) this.utilityProcess = undefined;
+    });
+    this.utilityProcess = { rpc, cwd };
+    this.touchUtility();
+    return rpc;
+  }
+
+  private touchUtility(): void {
+    const current = this.utilityProcess;
+    if (!current) return;
+    if (current.timer) clearTimeout(current.timer);
+    current.timer = setTimeout(() => {
+      if (this.utilityProcess === current && this.loginUi.size === 0) {
+        current.rpc.dispose();
+        this.utilityProcess = undefined;
+      }
+    }, 5 * 60_000);
+    current.timer.unref?.();
+  }
+
+  private async utilityReady(): Promise<OmpRpcProcess> {
+    const rpc = this.utility(this.utilityProcess?.cwd ?? homedir());
+    await Promise.race([
+      rpc.ready,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
+    ]);
+    return rpc;
+  }
+
+  async loginProviders(): Promise<Array<{ id: string; name: string; available: boolean; authenticated: boolean }>> {
+    const rpc = await this.utilityReady();
+    const result = await rpc.request<{ providers?: any[] }>({ type: "get_login_providers" });
+    return Array.isArray(result?.providers) ? result.providers : [];
+  }
+
+  /** OAuth login; omp opens the flow through `native.login.ui` events. Resolves when it finishes. */
+  async login(providerId: string): Promise<{ providerId: string }> {
+    const rpc = await this.utilityReady();
+    try {
+      return await rpc.request<{ providerId: string }>({ type: "login", providerId }, 11 * 60_000);
+    } finally {
+      this.loginUi.clear();
+      this.recycleIdle();
+    }
+  }
+
+  /** Answer omp's login prompt (pasted code / redirect URL); null cancels it. */
+  loginRespond(requestId: string, value: string | null): boolean {
+    const rpc = this.utilityProcess?.rpc;
+    if (!rpc || !this.loginUi.delete(requestId)) return false;
+    rpc.send(value === null ? { type: "extension_ui_response", id: requestId, cancelled: true } : { type: "extension_ui_response", id: requestId, value });
+    return true;
+  }
+
+  /** Stop a login in progress (kills the helper process; nothing is saved). */
+  cancelLogin(): void {
+    this.loginUi.clear();
+    this.utilityProcess?.rpc.dispose();
+    this.utilityProcess = undefined;
+  }
+
+  async logoutAccounts(providerId: string): Promise<Array<Record<string, unknown>>> {
+    const rpc = await this.utilityReady();
+    const result = await rpc.request<{ accounts?: any[] }>({ type: "get_logout_accounts", providerId });
+    return Array.isArray(result?.accounts) ? result.accounts : [];
+  }
+
+  async logout(providerId: string, credentialId: number): Promise<{ remainingSource?: string }> {
+    const rpc = await this.utilityReady();
+    const result = await rpc.request<{ remainingSource?: string }>({ type: "logout", providerId, credentialId });
+    this.recycleIdle();
+    return result ?? {};
+  }
+
   /** Chats in desktop plan mode (kept by id: session records get rebuilt on refresh). */
   private readonly planModes = new Set<string>();
 
@@ -1519,6 +1861,39 @@ export class OmpSessionService {
 }
 
 let shared: OmpSessionService | undefined;
+/** Drop terminal colour / cursor escapes from omp's command output. */
+export function stripAnsi(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\u001b\[[0-9;?]*[ -\/]*[@-~]/g, "").replace(/\u001b\][^\u0007]*\u0007/g, "");
+}
+
+function ompTreeNodes(node: any, parentId: string | null, onPath: Set<string>): OmpTreeNode[] {
+  const entry = node?.entry ?? {};
+  const id = String(entry.id ?? "");
+  const message = entry.type === "message" ? entry.message : undefined;
+  const role: OmpTreeNode["role"] | undefined = message
+    ? message.role === "user" ? "user" : message.role === "assistant" ? "assistant" : message.role === "toolResult" ? "tool" : "other"
+    : entry.type === "compaction" || entry.type === "branch_summary" ? "system" : undefined;
+  if (!role || role === "tool" || role === "other") {
+    // Bookkeeping entries (model changes, labels, tool results) fold into their children.
+    return (node?.children ?? []).flatMap((child: any) => ompTreeNodes(child, parentId, onPath));
+  }
+  const text = message ? textOf(message.content).text : String(entry.summary ?? "");
+  const tools = message && Array.isArray(message.content)
+    ? message.content.filter((part: any) => part?.type === "toolCall").map((part: any) => String(part.name ?? ""))
+    : [];
+  const preview = (text.trim() || (tools.length ? `⚙ ${tools.join(", ")}` : "")).replace(/\s+/g, " ").slice(0, 160);
+  return [{
+    id,
+    parentId,
+    role,
+    preview,
+    ...(entry.timestamp ? { timestamp: String(entry.timestamp) } : {}),
+    onPath: onPath.has(id),
+    children: (node?.children ?? []).flatMap((child: any) => ompTreeNodes(child, id, onPath)),
+  }];
+}
+
 export function ompSessionService(): OmpSessionService {
   shared ??= new OmpSessionService();
   return shared;
