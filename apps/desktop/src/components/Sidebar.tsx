@@ -1782,7 +1782,7 @@ export function Sidebar({
           ) : null}
           {session.source === "pi-native" ? (
             session.nativeHarness === "omp" ? (
-              <span className="thread-item-source" title="oh-my-pi (omp) session, read-only">OMP</span>
+              <span className="thread-item-source" title="oh-my-pi (omp) session">OMP</span>
             ) : (
               <span className="thread-item-source" title="Native Pi session">Pi</span>
             )

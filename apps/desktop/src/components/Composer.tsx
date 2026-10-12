@@ -394,9 +394,13 @@ export function Composer({
     thinkingLevel,
     controlsBlocked,
   });
+  // omp is the agent engine: a new chat (no session yet) becomes an omp
+  // session, and omp chooses the model from its own config.
   const modelReady = nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
-    : !!provider &&
+    : !activeSessionSummary
+      ? true
+      : !!provider &&
       provider.enabled &&
       !!modelId &&
       !isImageGenerationModel(imageGenerationCandidates, provider.id, modelId) &&
@@ -523,7 +527,7 @@ export function Composer({
         ) : null}
         {nativeReadOnly ? (
           <div className="composer-status" role="status">
-            Native Pi session is read-only: {activeSessionSummary?.readOnlyReason ?? "continuation unavailable"}.
+            This omp session is read-only: {activeSessionSummary?.readOnlyReason ?? "continuation unavailable"}.
           </div>
         ) : null}
         <ComposerStatus

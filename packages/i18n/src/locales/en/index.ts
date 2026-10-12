@@ -1,15 +1,15 @@
 export const en = {
   app: {
-    shellName: "PI-Desktop",
+    shellName: "OMP Desktop",
     tagline: "Local AI coding partner",
-    starting: "Starting PI-Desktop…",
+    starting: "Starting OMP Desktop…",
     loadingView: "Loading view…",
     uiCrashed: "Something went wrong with the interface",
   },
   startup: {
     slowTitle: "Still starting…",
-    slowBody: "PI-Desktop is taking longer than usual to reach your local service. It may still finish on its own — you can wait, or collect the logs first.",
-    stalledTitle: "PI-Desktop couldn't finish starting",
+    slowBody: "OMP Desktop is taking longer than usual to reach your local service. It may still finish on its own — you can wait, or collect the logs first.",
+    stalledTitle: "OMP Desktop couldn't finish starting",
     stalledBody: "This window never received your chats and settings, so there is nothing to show yet. Nothing was deleted — your data is still on disk.",
     retrying: "Trying again…",
     copyDiagnostics: "Copy diagnostics",
@@ -35,13 +35,13 @@ export const en = {
     unread: "Unread",
     pinned: "Pinned",
     viewMore: "View more…",
-    open: "Open PI-Desktop",
-    quit: "Quit PI-Desktop",
-    askTitle: "Keep PI-Desktop running in the background?",
+    open: "Open OMP Desktop",
+    quit: "Quit OMP Desktop",
+    askTitle: "Keep OMP Desktop running in the background?",
     askBody:
-      "When you close the window, PI-Desktop can keep running in the system tray so nothing is lost. You can change this any time in Settings.",
+      "When you close the window, OMP Desktop can keep running in the system tray so nothing is lost. You can change this any time in Settings.",
     closeToTray: "Close to tray",
-    confirmQuitTitle: "Quit PI-Desktop?",
+    confirmQuitTitle: "Quit OMP Desktop?",
     confirmQuitBody:
       "Are you sure you want to quit? All running sessions will be stopped and unsaved changes may be lost.",
     confirmQuit: "Quit",
@@ -99,7 +99,7 @@ export const en = {
     zoomOut: "Zoom Out",
     toggleFullScreen: "Toggle Full Screen",
     toggleDevTools: "Developer Tools",
-    appHelp: "PI-Desktop Help",
+    appHelp: "OMP Desktop Help",
     openLogs: "Open Logs",
     checkForUpdates: "Check for Updates…",
   },
@@ -262,7 +262,7 @@ export const en = {
     emptyTitle: "What can I help you build?",
     emptyTitleInProject: "What can we build in {{project}}?",
     emptyTitleTemporary: "What would you like to explore temporarily?",
-    placeholder: "Ask PI-Desktop to help with anything",
+    placeholder: "Ask OMP Desktop to help with anything",
     placeholderHome: "Ask anything",
     placeholderHint: "Type / for commands · @ for files",
     placeholderHomeHint: "Type / for commands · @ for files",
@@ -688,7 +688,7 @@ export const en = {
     },
     power: "Power",
     keepAwakeWhileRunning: "Keep computer awake",
-    keepAwakeWhileRunningDesc: "Prevent idle system sleep while PI-Desktop is running. The display may turn off; manual sleep and closing the lid still work.",
+    keepAwakeWhileRunningDesc: "Prevent idle system sleep while OMP Desktop is running. The display may turn off; manual sleep and closing the lid still work.",
     imageModel: "Image generation model",
     imageModelUnset: "Not configured",
     imageModelUnavailable: "Currently unavailable",
@@ -786,7 +786,7 @@ sklm: {
       "This provider comes from the plugin \"{{plugin}}\", which supplies its endpoint and models. Enable or disable it on the Plugins page.",
     pluginProviderKey: "API key",
     pluginProviderKeyHint:
-      "Stored in PI-Desktop and used by the runtime. The plugin never receives it.",
+      "Stored in OMP Desktop and used by the runtime. The plugin never receives it.",
     pluginProviderKeyRemove: "Remove key",
     pluginProviderKeySaved: "API key saved",
     pluginProviderKeyRemoved: "API key removed",
@@ -1758,7 +1758,7 @@ sklm: {
     noProjects: "No projects yet",
   },
   scheduled: {
-    description: "Run recurring agent tasks while PI-Desktop is open.",
+    description: "Run recurring agent tasks while OMP Desktop is open.",
     edit: "Edit task",
     hourlyHint: "Runs every hour, starting one hour after saving or enabling. Restarting the app starts a new interval.",
     morning: "Morning",
@@ -1772,7 +1772,7 @@ sklm: {
     legacyHint: "Edit and save a schedule to enable automatic runs.",
     time: "Time",
     weekday: "Day of the week",
-    localTimeHint: "Uses this computer’s local timezone. Keep PI-Desktop running; missed runs are skipped.",
+    localTimeHint: "Uses this computer’s local timezone. Keep OMP Desktop running; missed runs are skipped.",
     projectHint: "The current project is saved with this schedule. Runs use the default model.",
     autoPermissionHint: "Auto can run restricted actions without asking. Use it only for tasks you trust.",
     unavailableModel: "{{provider}} / {{model}} (unavailable)",
@@ -2274,13 +2274,13 @@ importConfirm: "Imported extensions run inside the agent process with the same a
         "Lets this plugin transform text you explicitly select in the Composer. It receives the draft and selected model key, but no conversation history or attachments.",
       "agent.extension": "Runs ExtensionAPI modules inside the agent process with the same access as the agent's own tools. Enable only code you trust.",
       "renderer.extension":
-        "Loads this plugin's renderer module into the app window to draw UI slot components (message action bars, entry extras, tool cards, code-block renderers, composer controls). The module runs in the same document as PI-Desktop. Enable only code you trust.",
+        "Loads this plugin's renderer module into the app window to draw UI slot components (message action bars, entry extras, tool cards, code-block renderers, composer controls). The module runs in the same document as OMP Desktop. Enable only code you trust.",
       "provider.register":
-        "Adds the providers this plugin defines to Settings' provider list. The plugin supplies the endpoint and models; your API key stays in PI-Desktop.",
+        "Adds the providers this plugin defines to Settings' provider list. The plugin supplies the endpoint and models; your API key stays in OMP Desktop.",
       "provider.oauth":
-        "Lets this plugin run OAuth login and refresh for its declared provider. PI-Desktop encrypts the tokens, but the trusted callback can read them. Host-mediated network access still requires net.fetch and declared domains; plugin entry code is not an OS sandbox, so grant this only to code you trust.",
+        "Lets this plugin run OAuth login and refresh for its declared provider. OMP Desktop encrypts the tokens, but the trusted callback can read them. Host-mediated network access still requires net.fetch and declared domains; plugin entry code is not an OS sandbox, so grant this only to code you trust.",
       "desktop.control":
-        "Lets the plugin invoke the reviewed PI-Desktop control catalog. Destructive operations still require confirm=true; the MCP bearer token is never exposed.",
+        "Lets the plugin invoke the reviewed OMP Desktop control catalog. Destructive operations still require confirm=true; the MCP bearer token is never exposed.",
       "models.list": "Can see which models you have signed in for. It does not receive keys.",
       "session.read":
         "Can read the conversation the current tool call is operating on, including tool results.",
@@ -2295,7 +2295,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
       "audio.capture.background": "Captures the microphone while the plugin runs in the background, with no panel open.",
       "audio.playback.background": "Plays audio the plugin streams, even when no panel is open.",
       "speech.adapter.register": "Can add a transcription or speech protocol that uses your existing provider keys. The plugin never sees the key.",
-      "keyboard.globalShortcut": "Registers system-wide keyboard shortcuts that trigger this plugin's own commands while PI-Desktop is not focused.",
+      "keyboard.globalShortcut": "Registers system-wide keyboard shortcuts that trigger this plugin's own commands while OMP Desktop is not focused.",
       "net.websocket": "Opens real-time two-way connections to the hostnames the plugin declared.",
       "net.anyHost": "Can reach any server over HTTP(S) or WebSocket(S), including user-entered self-hosted addresses. Cloud metadata endpoints stay blocked.",
       "bus.publish": "Can send messages on the topics it declared.",
@@ -2536,7 +2536,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
     unsupportedGlibc:
       "This Linux build needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36+).",
     dbSchemaTooNew:
-      "This PI-Desktop is older than your local data (data schema {{found}}, this build supports {{supported}}). Install the newer PI-Desktop that last opened this data, or a later version.",
+      "This OMP Desktop is older than your local data (data schema {{found}}, this build supports {{supported}}). Install the newer OMP Desktop that last opened this data, or a later version.",
     archMismatch:
       "This is the {{buildArch}} build running on a {{machineArch}} machine, so it runs through translation and is slower. Install the {{machineArch}} build instead.",
     dismissArchMismatch: "Dismiss",
@@ -2595,7 +2595,7 @@ importConfirm: "Imported extensions run inside the agent process with the same a
     workOptions: "Connect a work session",
     noWorkTarget: "No session selected. Say list sessions and choose one by name.",
     workStatusTitle: "Selected work session and activity",
-    sessionSource: { desktop: "Desktop", "pi-native": "Native Pi", remote: "Remote host" },
+    sessionSource: { desktop: "Desktop", "pi-native": "omp", remote: "Remote host" },
     allowWork: "Allow work requests",
     noWorkSession: "Choose or create a local work session.",
     playbackBlocked: "Sound is paused",

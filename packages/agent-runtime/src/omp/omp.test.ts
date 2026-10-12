@@ -1,0 +1,138 @@
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { OmpNotFoundError, resolveOmpBinary } from "./binary.js";
+import { parseOmpSession } from "./session-store.js";
+import { OmpSessionService } from "./service.js";
+
+const roots: string[] = [];
+const savedEnv = { ...process.env };
+afterEach(() => {
+  process.env = { ...savedEnv };
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+function tmp(): string {
+  const root = mkdtempSync(join(tmpdir(), "omp-test-"));
+  roots.push(root);
+  return root;
+}
+
+const SESSION = [
+  { type: "title", v: 1, title: "", updatedAt: "2026-10-12T07:09:34.108Z" },
+  { type: "session", version: 3, id: "sid-1", timestamp: "2026-10-12T07:09:34.108Z", cwd: "/tmp" },
+  { type: "model_change", id: "m", parentId: null, timestamp: "2026-10-12T07:09:34.214Z", model: "mock/mock-1" },
+  { type: "message", id: "u", parentId: "m", timestamp: "2026-10-12T07:09:35.000Z", message: { role: "user", content: [{ type: "text", text: "run it" }], attribution: "user" } },
+  { type: "message", id: "a", parentId: "u", timestamp: "2026-10-12T07:09:36.000Z", message: { role: "assistant", content: [{ type: "text", text: "ok" }, { type: "toolCall", id: "c1", name: "bash", arguments: { command: "echo hi" } }], provider: "mock", model: "mock-1", stopReason: "toolUse" } },
+  { type: "custom", customType: "tool_execution_start", id: "x", parentId: "a", timestamp: "2026-10-12T07:09:36.100Z", data: {} },
+  { type: "message", id: "t", parentId: "x", timestamp: "2026-10-12T07:09:37.000Z", message: { role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text: "hi" }], isError: false } },
+];
+
+describe("omp session store", () => {
+  it("projects the active branch, tool args, and model", () => {
+    const dir = tmp();
+    const file = join(dir, "s.jsonl");
+    writeFileSync(file, `${SESSION.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+    const parsed = parseOmpSession(file)!;
+    expect(parsed).toMatchObject({ sessionId: "sid-1", cwd: "/tmp", providerId: "mock", modelId: "mock-1", title: "run it" });
+    expect(parsed.messages.map((message) => message.role)).toEqual(["user", "assistant", "tool"]);
+    expect(parsed.messages[2]).toMatchObject({ toolName: "bash", toolArgs: { command: "echo hi" }, toolStatus: "success" });
+  });
+});
+
+describe("omp binary resolution", () => {
+  it("fails with OMP_NOT_FOUND and an install hint", () => {
+    expect(() => resolveOmpBinary({ PI_DESKTOP_OMP_BIN: "/definitely/missing/omp" })).toThrow(OmpNotFoundError);
+    try {
+      resolveOmpBinary({ PI_DESKTOP_OMP_BIN: "/definitely/missing/omp" });
+    } catch (error) {
+      expect((error as OmpNotFoundError).errorCode).toBe("OMP_NOT_FOUND");
+      expect((error as Error).message).toContain("bun install -g @oh-my-pi/pi-coding-agent");
+    }
+  });
+});
+
+// A tiny stand-in for `omp --mode rpc` that speaks the same JSONL frames.
+const FAKE_OMP = `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const dir = process.env.FAKE_OMP_SESSIONS;
+const file = path.join(dir, "-proj", "fake.jsonl");
+const out = (frame) => process.stdout.write(JSON.stringify(frame) + "\\n");
+out({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1] });
+let buf = "";
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const cmd = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+    if (cmd.type === "get_state") out({ type: "response", id: cmd.id, command: "get_state", success: true, data: { sessionFile: file } });
+    if (cmd.type === "prompt") {
+      out({ type: "response", id: cmd.id, command: "prompt", success: true });
+      const user = { role: "user", content: [{ type: "text", text: cmd.message }], attribution: "user" };
+      const asst = { role: "assistant", content: [{ type: "text", text: "echo: " + cmd.message }], provider: "fake", model: "m", stopReason: "stop" };
+      out({ type: "agent_start" });
+      out({ type: "message_end", message: user, messageId: "msg-1" });
+      out({ type: "message_start", message: { ...asst, content: [] } });
+      out({ type: "message_update", assistantMessageEvent: { type: "text_delta", partial: asst } });
+      out({ type: "tool_execution_start", toolCallId: "c1", toolName: "bash", args: { command: "true" } });
+      out({ type: "tool_execution_end", toolCallId: "c1", toolName: "bash", result: { content: [] }, isError: false });
+      out({ type: "message_end", message: asst, messageId: "msg-2" });
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, [
+        { type: "session", version: 3, id: "fake", timestamp: new Date().toISOString(), cwd: process.cwd() },
+        { type: "message", id: "u", parentId: null, timestamp: new Date().toISOString(), message: user },
+        { type: "message", id: "a", parentId: "u", timestamp: new Date().toISOString(), message: asst },
+      ].map((e) => JSON.stringify(e)).join("\\n") + "\\n");
+      out({ type: "agent_end", messages: [] });
+      out({ type: "prompt_result", id: cmd.id, agentInvoked: true, status: "completed", sessionSettled: true });
+    }
+  }
+});
+process.stdin.on("end", () => process.exit(0));
+`;
+
+describe("OmpSessionService", () => {
+  it("creates a session, streams a turn through the omp RPC process, and lists the persisted file", async () => {
+    const root = tmp();
+    const bin = join(root, "omp");
+    writeFileSync(bin, FAKE_OMP);
+    chmodSync(bin, 0o755);
+    const agentDir = join(root, "agent");
+    const sessionRoot = join(agentDir, "sessions");
+    mkdirSync(sessionRoot, { recursive: true });
+    const project = join(root, "project");
+    mkdirSync(project);
+    process.env.PI_DESKTOP_OMP_BIN = bin;
+    process.env.FAKE_OMP_SESSIONS = sessionRoot;
+
+    const service = new OmpSessionService({ agentDir, sessionRoot });
+    const created = service.create({ projectPath: project });
+    expect(created).toMatchObject({ source: "pi-native", nativeHarness: "omp", capabilities: { canPrompt: true } });
+
+    const events: string[] = [];
+    const ended = new Promise<void>((resolve) => {
+      void service.prompt(created.id, "hello", (envelope) => {
+        events.push(envelope.event.type);
+        if (envelope.event.type === "agent_end") resolve();
+      }, "optimistic-1");
+    });
+    await ended;
+    expect(events).toEqual(expect.arrayContaining([
+      "agent_start", "user_message_persisted", "message_start", "message_update", "tool_start", "tool_end", "message_end", "agent_end",
+    ]));
+    const sessions = await service.list();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ id: created.id, title: "hello", providerId: "fake", modelId: "m" });
+    expect(service.detail(created.id)?.messages.map((message) => message.content)).toEqual(["hello", "echo: hello"]);
+    service.disposeAll();
+  });
+
+  it("reports a missing omp binary as a turn error", async () => {
+    const root = tmp();
+    process.env.PI_DESKTOP_OMP_BIN = join(root, "missing-omp");
+    const service = new OmpSessionService({ agentDir: join(root, "agent") });
+    const created = service.create({ projectPath: root });
+    await expect(service.prompt(created.id, "hi", () => undefined)).rejects.toMatchObject({ errorCode: "OMP_NOT_FOUND" });
+  });
+});

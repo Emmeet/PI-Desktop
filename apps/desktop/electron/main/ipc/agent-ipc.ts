@@ -51,7 +51,7 @@ export type AgentIpcDependencies = {
 
 function rejectNativeAgentOperation(sessionId: string): void {
   if (sessionId.startsWith("native-pi:")) {
-    throw Object.assign(new Error("Operation is unsupported for native Pi sessions"), { errorCode: "NATIVE_PI_UNSUPPORTED" });
+    throw Object.assign(new Error("Operation is unsupported for omp sessions"), { errorCode: "NATIVE_PI_UNSUPPORTED" });
   }
 }
 
@@ -184,12 +184,12 @@ export function registerAgentIpc({
       // Desktop-managed MCP servers are not installed in native Pi sessions.
       if (/^\/mcp:\S/.test(req.content)) expandMcpInvocation(req.content, []);
       if (voiceOrigin) {
-        throw Object.assign(new Error("Live Voice work is unsupported for native Pi sessions"), {
+        throw Object.assign(new Error("Live Voice work is unsupported for omp sessions"), {
           errorCode: "NATIVE_PI_UNSUPPORTED",
         });
       }
       if (req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined || req.attachments?.length) {
-        throw Object.assign(new Error("Native Pi continuation currently supports text prompts only"), {
+        throw Object.assign(new Error("omp sessions currently support text prompts only (no attachments or message edits)"), {
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }

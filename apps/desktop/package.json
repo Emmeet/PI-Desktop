@@ -3,7 +3,7 @@
   "version": "0.18.0",
   "desktopName": "pi-desktop.desktop",
   "private": true,
-  "description": "PI-Desktop Electron application",
+  "description": "OMP Desktop: Electron app for the oh-my-pi (omp) coding agent",
   "homepage": "https://github.com/vastsa/PI-Desktop",
   "author": {
     "name": "vastsa",
@@ -81,7 +81,7 @@
   },
   "build": {
     "appId": "net.aiuo.pi-desktop",
-    "productName": "PI-Desktop",
+    "productName": "OMP Desktop",
     "directories": {
       "output": "release"
     },

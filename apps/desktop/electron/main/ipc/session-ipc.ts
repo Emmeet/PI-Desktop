@@ -85,6 +85,9 @@ function modelConfigSelectionKey(value: unknown): string | null {
   return modelConfigImportKey(source, externalId);
 }
 
+/** omp (oh-my-pi) is the only agent engine; see packages/agent-runtime/src/omp. */
+const OMP_ONLY = process.env.PI_DESKTOP_LEGACY_PI_ENGINE !== "1";
+
 export type SessionIpcDependencies = {
   registrar: IpcRegistrar;
   getHost: () => HostProcess | null;
@@ -154,16 +157,29 @@ export function registerSessionIpc({
     ]);
     return {
       ...result,
+      // omp is the only agent engine: legacy embedded-pi desktop sessions
+      // are hidden; every listed session is an omp session.
       sessions: [
-        ...result.sessions.map((session) => ({
-          ...enrichSession(session, providers, defaults),
-          source: "desktop",
-        })),
+        ...(OMP_ONLY
+          ? []
+          : result.sessions.map((session) => ({
+              ...enrichSession(session, providers, defaults),
+              source: "desktop",
+            }))),
         ...native.sessions,
       ].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
     };
   });
   handle(IPC.invoke.sessionCreate, async (input = {}) => {
+    if (OMP_ONLY) {
+      if (!sidecar) throw new Error("agent sidecar unavailable");
+      const res = await sidecar.call<{ session: RuntimeSession & { id: string } }>("native.session.create", {
+        projectPath: typeof input?.projectPath === "string" ? input.projectPath : null,
+        title: typeof input?.title === "string" ? input.title : undefined,
+      });
+      logger.app("session", "info", "omp session created", { sessionId: res.session?.id });
+      return res;
+    }
     if (!host) throw new Error("host unavailable");
     const capabilityPromise = sessionCapabilityContext();
     const res = await host.call<{ session?: (RuntimeSession & { id?: string }) | null }>(

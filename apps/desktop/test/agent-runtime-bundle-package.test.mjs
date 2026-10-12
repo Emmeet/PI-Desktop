@@ -99,7 +99,7 @@ test(
         Buffer.byteLength(sidecarSource) < 500 * 1024,
         `sidecar entry must stay below esbuild's 500 KiB size-warning threshold; got ${Buffer.byteLength(sidecarSource)} bytes`,
       );
-      assert.match(sidecarSource, /import\(["']\.\/chunks\/native-pi-session-/);
+      assert.match(sidecarSource, /import\(["']\.\/chunks\/service-/);
       assert.match(sidecarSource, /import\(["']\.\/chunks\/runner-/);
 
       const childEnv = {

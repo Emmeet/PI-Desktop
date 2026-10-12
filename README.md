@@ -1,3 +1,8 @@
+> **This fork: OMP Desktop.** This branch (`feat/omp-support` on
+> [Emmeet/PI-Desktop](https://github.com/Emmeet/PI-Desktop)) turns PI-Desktop
+> into a desktop app for [oh-my-pi (`omp`)](https://github.com/can1357/oh-my-pi).
+> omp is the only agent engine. See [Running with omp](#running-with-omp-oh-my-pi).
+
 <div align="center">
 
 <img src="docs/image/readme/logo.png" alt="PI-Desktop" width="108" />
@@ -763,3 +768,77 @@ See [LICENSE](LICENSE) for details.
 <sub>Local-first · Model-agnostic · Plugin-powered</sub>
 
 </div>
+
+
+## Running with omp (oh-my-pi)
+
+This fork drives the [`omp`](https://github.com/can1357/oh-my-pi) CLI as its
+only agent engine. Each chat runs in its own `omp --mode rpc` process, and the
+app shows omp's streaming output and tool calls. omp keeps its own sessions,
+models, and credentials; the app never reads omp's secrets.
+
+### 1. Install omp
+
+```bash
+curl -fsSL https://bun.sh/install | bash        # Bun, if you don't have it
+bun install -g @oh-my-pi/pi-coding-agent        # provides the `omp` command
+omp --version
+```
+
+Then set up a model the way omp normally does: run `omp` once in a terminal and
+log in (`/login`), or export a provider API key, or define providers in
+`~/.omp/agent/models.yml`. If plain `omp` can chat in a terminal, the desktop
+app can too.
+
+### 2. Build and run the app from source
+
+```bash
+git clone -b feat/omp-support https://github.com/Emmeet/PI-Desktop.git
+cd PI-Desktop
+pnpm install
+pnpm build:js
+cargo build -p host-core          # needs a recent stable Rust (1.88+)
+pnpm dev                          # or: cd apps/desktop && pnpm build && npx electron .
+```
+
+Or use the launcher, which builds anything missing and starts the app:
+
+```bash
+scripts/run-omp-desktop.sh                       # add OMP_DESKTOP_NO_SANDBOX=1 in containers/VMs
+PI_DESKTOP_OMP_MODEL=provider/model scripts/run-omp-desktop.sh
+```
+
+### How it works
+
+- **New chat** creates an omp session in the chosen project folder. The first
+  message starts `omp --mode rpc --cwd <project>`.
+- **Existing omp sessions** from `~/.omp/agent/sessions` show in the sidebar
+  with an `OMP` badge. Opening one and sending a message resumes it with
+  `omp --resume <file>`.
+- **Stop** sends omp's `abort` command.
+- Models, logins, tools, extensions, and compaction all come from omp itself.
+
+### Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `PI_DESKTOP_OMP_BIN` | Full path to the `omp` executable. Without it the app searches `PATH`, `~/.bun/bin`, `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin`. |
+| `PI_DESKTOP_OMP_AGENT_DIR` | Use a different omp agent directory (default `~/.omp/agent`, or `PI_CODING_AGENT_DIR`). |
+| `PI_DESKTOP_OMP_MODEL` | `provider/model` to pass as `--model` when a new session starts. |
+| `PI_DESKTOP_LEGACY_PI_ENGINE=1` | Restore the original embedded-pi behavior (unsupported in this fork). |
+
+If `omp` can't be found, sending a message fails with an `OMP_NOT_FOUND`
+error that includes these install instructions.
+
+### Current limitations
+
+- Text prompts only: no image or file attachments, message editing, or
+  regenerating from the desktop UI.
+- Forking, renaming, and deleting omp sessions from the app are not supported
+  yet. omp's own `/fork` and similar commands work inside the chat.
+- The app's model picker, permission modes, plan mode, subagent panel, and
+  desktop plugins/MCP servers do not control omp. omp uses its own settings,
+  and its tools run without desktop approval prompts.
+- The Rust host service still starts for settings and projects, and the
+  embedded pi packages are still in the dependency tree, but they are not used
+  to run agents.

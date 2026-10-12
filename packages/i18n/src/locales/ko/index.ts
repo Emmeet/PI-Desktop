@@ -2,16 +2,16 @@ import { en, type EnglishCatalog } from "../en/index.js";
 
 export const ko = {
   app: {
-    shellName: "PI-Desktop",
+    shellName: "OMP Desktop",
     tagline: "로컬 AI 코딩 파트너",
-    starting: "PI-Desktop 시작 중…",
+    starting: "OMP Desktop 시작 중…",
     loadingView: "화면 불러오는 중…",
     uiCrashed: "인터페이스에 문제가 발생했습니다",
   },
   startup: {
     slowTitle: "아직 시작 중…",
-    slowBody: "PI-Desktop이 로컬 서비스에 연결되는 데 평소보다 오래 걸리고 있습니다. 스스로 완료될 수도 있으니 기다리거나, 먼저 로그를 수집해 두세요.",
-    stalledTitle: "PI-Desktop이 시작을 완료하지 못했습니다",
+    slowBody: "OMP Desktop이 로컬 서비스에 연결되는 데 평소보다 오래 걸리고 있습니다. 스스로 완료될 수도 있으니 기다리거나, 먼저 로그를 수집해 두세요.",
+    stalledTitle: "OMP Desktop이 시작을 완료하지 못했습니다",
     stalledBody: "이 창은 대화와 설정을 받지 못해 아직 표시할 내용이 없습니다. 삭제된 것은 없으며 데이터는 여전히 디스크에 있습니다.",
     retrying: "다시 시도하는 중…",
     copyDiagnostics: "진단 정보 복사",
@@ -37,13 +37,13 @@ export const ko = {
     unread: "읽지 않음",
     pinned: "고정됨",
     viewMore: "더 보기…",
-    open: "PI-Desktop 열기",
-    quit: "PI-Desktop 종료",
-    askTitle: "PI-Desktop을 백그라운드에서 계속 실행할까요?",
+    open: "OMP Desktop 열기",
+    quit: "OMP Desktop 종료",
+    askTitle: "OMP Desktop을 백그라운드에서 계속 실행할까요?",
     askBody:
-      "창을 닫아도 PI-Desktop을 시스템 트레이에서 계속 실행하여 작업을 잃지 않을 수 있습니다. 이 설정은 언제든지 설정에서 변경할 수 있습니다.",
+      "창을 닫아도 OMP Desktop을 시스템 트레이에서 계속 실행하여 작업을 잃지 않을 수 있습니다. 이 설정은 언제든지 설정에서 변경할 수 있습니다.",
     closeToTray: "트레이로 닫기",
-    confirmQuitTitle: "PI-Desktop을 종료할까요?",
+    confirmQuitTitle: "OMP Desktop을 종료할까요?",
     confirmQuitBody:
       "정말 종료할까요? 실행 중인 모든 세션이 중지되며 저장하지 않은 변경 사항을 잃을 수 있습니다.",
     confirmQuit: "종료",
@@ -101,7 +101,7 @@ export const ko = {
     zoomOut: "축소",
     toggleFullScreen: "전체 화면 전환",
     toggleDevTools: "개발자 도구",
-    appHelp: "PI-Desktop 도움말",
+    appHelp: "OMP Desktop 도움말",
     openLogs: "로그 열기",
     checkForUpdates: "업데이트 확인…",
   },
@@ -264,7 +264,7 @@ export const ko = {
     emptyTitle: "무엇을 만들어 볼까요?",
     emptyTitleInProject: "{{project}}에서 무엇을 만들어 볼까요?",
     emptyTitleTemporary: "무엇을 임시로 탐색해 볼까요?",
-    placeholder: "PI-Desktop에 무엇이든 도움을 요청하세요",
+    placeholder: "OMP Desktop에 무엇이든 도움을 요청하세요",
     placeholderHome: "무엇이든 물어보세요",
     placeholderHint: "명령은 / · 파일은 @ 입력",
     placeholderHomeHint: "명령은 / · 파일은 @ 입력",
@@ -685,7 +685,7 @@ export const ko = {
     },
     power: "전원",
     keepAwakeWhileRunning: "컴퓨터 절전 방지",
-    keepAwakeWhileRunningDesc: "PI-Desktop 실행 중 유휴 상태로 인한 시스템 절전을 방지합니다. 화면은 꺼질 수 있으며 수동 절전과 덮개 닫기는 그대로 작동합니다.",
+    keepAwakeWhileRunningDesc: "OMP Desktop 실행 중 유휴 상태로 인한 시스템 절전을 방지합니다. 화면은 꺼질 수 있으며 수동 절전과 덮개 닫기는 그대로 작동합니다.",
     "imageModel": "이미지 생성 모델",
     "imageModelUnset": "설정되지 않음",
     "imageModelUnavailable": "현재 사용 불가",
@@ -782,7 +782,7 @@ sklm: {
     pluginProviderManaged:
       "이 프로바이더는 플러그인 “{{plugin}}”에서 제공하며 엔드포인트와 모델도 함께 제공합니다. “확장 기능” 페이지에서 켜거나 끌 수 있습니다.",
     pluginProviderKey: "API 키",
-    pluginProviderKeyHint: "PI-Desktop에 저장되고 런타임에서 사용됩니다. 플러그인은 이 키를 받지 않습니다.",
+    pluginProviderKeyHint: "OMP Desktop에 저장되고 런타임에서 사용됩니다. 플러그인은 이 키를 받지 않습니다.",
     pluginProviderKeyRemove: "키 제거",
     pluginProviderKeySaved: "API 키가 저장됨",
     pluginProviderKeyRemoved: "API 키 제거됨",
@@ -1751,7 +1751,7 @@ sklm: {
     noProjects: "프로젝트가 아직 없음",
   },
   scheduled: {
-    description: "PI-Desktop이 열려 있는 동안 반복 에이전트 작업을 실행합니다.",
+    description: "OMP Desktop이 열려 있는 동안 반복 에이전트 작업을 실행합니다.",
     edit: "작업 편집",
     hourlyHint: "저장 또는 활성화한 뒤 1시간마다 실행합니다. 앱을 다시 시작하면 간격을 새로 계산합니다.",
     morning: "오전",
@@ -2264,13 +2264,13 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
         "모델 할당량을 사용해 일회성 완성을 실행할 수 있습니다. 플러그인은 API 키를 받지 않습니다.",
       "composer.transform": "작성기에서 직접 선택한 텍스트를 변환하도록 허용합니다. 플러그인은 초안과 선택된 모델 키만 받으며 대화 기록이나 첨부 파일은 받지 않습니다.",
       "agent.extension": "ExtensionAPI 모듈을 에이전트 프로세스 안에서 에이전트 자체 도구와 같은 권한으로 실행합니다. 신뢰하는 코드만 켜세요.",
-      "renderer.extension": "이 플러그인의 렌더러 모듈을 앱 창에 로드하여 메시지 작업 표시줄, 응답 추가 영역, 도구 카드, 코드 블록 렌더러, 작성기 컨트롤 등 UI 슬롯 구성 요소를 그립니다. 모듈은 PI-Desktop과 같은 문서에서 실행됩니다. 신뢰하는 코드만 활성화하세요.",
+      "renderer.extension": "이 플러그인의 렌더러 모듈을 앱 창에 로드하여 메시지 작업 표시줄, 응답 추가 영역, 도구 카드, 코드 블록 렌더러, 작성기 컨트롤 등 UI 슬롯 구성 요소를 그립니다. 모듈은 OMP Desktop과 같은 문서에서 실행됩니다. 신뢰하는 코드만 활성화하세요.",
       "provider.register":
-        "이 플러그인이 정의한 프로바이더를 설정의 프로바이더 목록에 추가합니다. 플러그인은 엔드포인트와 모델을 제공하며, API 키는 PI-Desktop에 남습니다.",
+        "이 플러그인이 정의한 프로바이더를 설정의 프로바이더 목록에 추가합니다. 플러그인은 엔드포인트와 모델을 제공하며, API 키는 OMP Desktop에 남습니다.",
       "provider.oauth":
-        "이 플러그인이 선언된 프로바이더의 OAuth 로그인과 토큰 갱신을 수행하도록 허용합니다. PI-Desktop은 토큰을 암호화하지만 신뢰하는 콜백은 토큰을 읽을 수 있습니다. 호스트가 중개하는 네트워크 접근에는 net.fetch와 선언된 도메인이 필요하며, 플러그인 프로세스는 운영체제 샌드박스가 아닙니다. 신뢰하는 코드에만 허용하세요.",
+        "이 플러그인이 선언된 프로바이더의 OAuth 로그인과 토큰 갱신을 수행하도록 허용합니다. OMP Desktop은 토큰을 암호화하지만 신뢰하는 콜백은 토큰을 읽을 수 있습니다. 호스트가 중개하는 네트워크 접근에는 net.fetch와 선언된 도메인이 필요하며, 플러그인 프로세스는 운영체제 샌드박스가 아닙니다. 신뢰하는 코드에만 허용하세요.",
       "desktop.control":
-        "플러그인이 검토된 PI-Desktop 제어 카탈로그를 호출할 수 있습니다. 파괴적 작업에는 여전히 confirm=true가 필요하며 MCP bearer token은 노출되지 않습니다.",
+        "플러그인이 검토된 OMP Desktop 제어 카탈로그를 호출할 수 있습니다. 파괴적 작업에는 여전히 confirm=true가 필요하며 MCP bearer token은 노출되지 않습니다.",
       "models.list": "로그인한 모델을 볼 수 있지만 키는 받지 않습니다.",
       "session.read":
         "현재 도구 호출이 처리 중인 대화와 도구 결과를 읽을 수 있습니다.",
@@ -2285,7 +2285,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
       "audio.capture.background": "플러그인이 백그라운드에서 실행되는 동안 패널이 열려 있지 않아도 마이크를 캡처합니다.",
       "audio.playback.background": "패널이 열려 있지 않아도 플러그인이 스트리밍하는 오디오를 재생합니다.",
       "speech.adapter.register": "기존 제공자 키를 쓰는 받아쓰기 또는 낭독 프로토콜을 추가할 수 있습니다. 플러그인은 키를 보지 못합니다.",
-      "keyboard.globalShortcut": "PI-Desktop이 포커스되지 않은 상태에서 이 플러그인 자체 명령을 실행하는 시스템 전역 키보드 단축키를 등록합니다.",
+      "keyboard.globalShortcut": "OMP Desktop이 포커스되지 않은 상태에서 이 플러그인 자체 명령을 실행하는 시스템 전역 키보드 단축키를 등록합니다.",
       "net.websocket": "플러그인이 선언한 호스트로 실시간 양방향 연결을 엽니다.",
       "net.anyHost": "HTTP(S) 또는 WebSocket(S)으로 사용자가 입력한 자체 호스팅 주소를 포함한 모든 서버에 접속할 수 있습니다. 클라우드 메타데이터 엔드포인트는 항상 차단됩니다.",
       "bus.publish": "선언한 주제로 메시지를 보낼 수 있습니다.",
@@ -2525,7 +2525,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
     unsupportedGlibc:
       "이 Linux 빌드에는 glibc 2.35 이상이 필요합니다 (Ubuntu 22.04, Debian 12, Fedora 36+).",
     dbSchemaTooNew:
-      "이 PI-Desktop은 로컬 데이터보다 오래된 버전입니다(데이터 스키마 {{found}}, 이 버전은 {{supported}}까지 지원). 이 데이터를 마지막으로 연 최신 PI-Desktop 또는 그 이후 버전을 설치하세요.",
+      "이 OMP Desktop은 로컬 데이터보다 오래된 버전입니다(데이터 스키마 {{found}}, 이 버전은 {{supported}}까지 지원). 이 데이터를 마지막으로 연 최신 OMP Desktop 또는 그 이후 버전을 설치하세요.",
     archMismatch:
       "{{machineArch}} 기기에서 {{buildArch}} 빌드를 실행 중이므로 변환을 거쳐 더 느리게 동작합니다. {{machineArch}} 빌드를 설치하세요.",
     dismissArchMismatch: "닫기",
@@ -2583,7 +2583,7 @@ importConfirm: "가져온 확장은 에이전트 프로세스 안에서 에이�
     workNotConnected: "이 통화는 작업 세션에 연결되어 있지 않습니다.",
     workOptions: "작업 세션 연결",
     workStatusTitle: "선택한 작업 세션 및 활동",
-    sessionSource: { desktop: "Desktop", "pi-native": "Native Pi", remote: "원격 호스트" },
+    sessionSource: { desktop: "Desktop", "pi-native": "omp", remote: "원격 호스트" },
     noWorkTarget: "선택된 세션이 없습니다. 세션 목록이라고 말하고 이름으로 선택하세요.",
     allowWork: "작업 요청 허용",
     noWorkSession: "로컬 작업 세션을 선택하거나 만드세요.",

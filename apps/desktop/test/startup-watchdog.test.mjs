@@ -155,7 +155,7 @@ test("the diagnostics report states what the renderer already knows", () => {
     downMessage: "HOST_UNAVAILABLE",
   });
 
-  assert.match(report, /^PI-Desktop startup diagnostics\n/);
+  assert.match(report, /^OMP Desktop startup diagnostics\n/);
   assert.match(report, /phase: stalled/);
   assert.match(report, /waited: 181s/);
   assert.match(report, /platform: darwin/);
@@ -306,8 +306,8 @@ test("the recovery copy is catalog-backed in every mirrored locale", () => {
       assert.match(catalog, new RegExp(`${key}:`), `${name} is missing startup.${key}`);
     }
   }
-  assert.match(english, /stalledTitle: "PI-Desktop couldn't finish starting"/);
-  assert.match(chinese, /stalledTitle: "PI-Desktop 未能完成启动"/);
+  assert.match(english, /stalledTitle: "OMP Desktop couldn't finish starting"/);
+  assert.match(chinese, /stalledTitle: "OMP Desktop 未能完成启动"/);
   // User-facing copy: the local service is never called a host or a backend.
   const startupDomain = english.match(/\n  startup: \{[\s\S]*?\n  \},/)?.[0] ?? "";
   assert.ok(startupDomain.length > 0, "the English startup domain was not found");

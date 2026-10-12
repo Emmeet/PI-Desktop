@@ -52,26 +52,21 @@ import type {
 
 type RuntimeMap = Map<string, DesktopAgentRuntime>;
 
-type NativePiServiceFactory = typeof import("./native-pi-session.js")["nativePiService"];
-let nativePiServiceFactory: NativePiServiceFactory | undefined;
-
-async function loadNativePiServiceFactory(): Promise<NativePiServiceFactory> {
-  if (!nativePiServiceFactory) {
-    nativePiServiceFactory = (await import("./native-pi-session.js")).nativePiService;
-  }
-  return nativePiServiceFactory;
-}
-
-/** omp (oh-my-pi) session discovery is on unless explicitly disabled. */
-function ompSessionsEnabled(): boolean {
-  const value = process.env.PI_DESKTOP_OMP_SESSIONS?.trim().toLowerCase();
-  return value !== "0" && value !== "false" && value !== "off";
+type OmpModule = typeof import("./omp/service.js");
+let ompModule: OmpModule | undefined;
+async function loadOmp(): Promise<OmpModule> {
+  ompModule ??= await import("./omp/service.js");
+  return ompModule;
 }
 
 async function getNativeServices() {
-  const factory = await loadNativePiServiceFactory();
-  const pi = factory({ harness: "pi" });
-  return ompSessionsEnabled() ? [pi, factory({ harness: "omp" })] : [pi];
+  // omp (oh-my-pi) is the only agent engine; the embedded pi native-session
+  // path is kept in the tree but no longer wired in.
+  if (process.env.PI_DESKTOP_LEGACY_PI_ENGINE === "1") {
+    // Opt-in escape hatch: the original embedded-pi native session path.
+    return [(await import("./native-pi-session.js")).nativePiService()];
+  }
+  return [(await loadOmp()).ompSessionService()];
 }
 
 /**
@@ -444,6 +439,14 @@ async function handle(method: string, params: any): Promise<unknown> {
         }),
       };
     }
+    case "native.session.create": {
+      return {
+        session: (await loadOmp()).ompSessionService().create({
+          projectPath: typeof params.projectPath === "string" ? params.projectPath : null,
+          title: typeof params.title === "string" ? params.title : undefined,
+        }),
+      };
+    }
     case "native.session.fork": {
       const service = await getNativePiService(String(params.id ?? ""));
       return {
@@ -692,8 +695,7 @@ readNdjsonLines(process.stdin, async (line) => {
 // default for `unhandledRejection` is to exit the process. Log and carry on;
 // the affected session surfaces its own error through the normal event path.
 process.on("exit", () => {
-  nativePiServiceFactory?.({ harness: "pi" }).disposeAll();
-  if (ompSessionsEnabled()) nativePiServiceFactory?.({ harness: "omp" }).disposeAll();
+  ompModule?.ompSessionService().disposeAll();
 });
 
 process.on("unhandledRejection", (reason) => {
