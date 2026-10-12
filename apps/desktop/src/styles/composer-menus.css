@@ -715,3 +715,73 @@
   flex: 0 0 auto;
   margin-left: auto;
 }
+
+/* omp model picker: wide, readable two-line rows grouped by provider. */
+.composer-model-menu.omp-model-menu {
+  width: min(440px, calc(100vw - 24px));
+  padding: 8px;
+}
+
+.omp-model-menu .composer-model-list {
+  max-height: min(420px, calc(100vh - 200px));
+}
+
+.omp-model-menu .composer-model-search {
+  margin-bottom: 6px;
+}
+
+.omp-model-menu .composer-model-group + .composer-model-group {
+  margin-top: 6px;
+}
+
+.omp-model-menu .composer-model-group-label {
+  padding: 8px 10px 4px;
+}
+
+.omp-model-menu .composer-model-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+}
+
+.composer-model-menu.omp-model-menu .composer-model-option-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+  text-align: left;
+}
+
+.composer-model-menu.omp-model-menu .composer-model-label {
+  text-align: left;
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.composer-model-menu.omp-model-menu .composer-model-option-meta {
+  align-self: flex-start;
+  text-align: left;
+  margin: 0;
+  color: var(--ds-text-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.omp-model-menu .composer-model-option.active {
+  background: var(--ds-bg-selected, color-mix(in oklab, var(--ds-text-primary) 10%, transparent));
+}
+
+.composer-model-menu.omp-thinking-menu {
+  width: min(200px, calc(100vw - 24px));
+  padding: 6px;
+}

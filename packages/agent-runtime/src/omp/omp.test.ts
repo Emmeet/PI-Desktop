@@ -67,7 +67,7 @@ process.stdin.on("data", (chunk) => {
   while ((i = buf.indexOf("\\n")) >= 0) {
     const cmd = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
     if (process.env.FAKE_OMP_LOG) fs.appendFileSync(process.env.FAKE_OMP_LOG, JSON.stringify({ cmd: cmd.type, provider: cmd.provider, modelId: cmd.modelId, level: cmd.level, argv: process.argv.slice(2) }) + "\\n");
-    if (cmd.type === "get_available_models") out({ type: "response", id: cmd.id, command: cmd.type, success: true, data: { models: [{ provider: "p1", id: "m1", name: "Model One", reasoning: true, apiKey: "SECRET", headers: { Authorization: "x" } }] } });
+    if (cmd.type === "get_available_models") out({ type: "response", id: cmd.id, command: cmd.type, success: true, data: { models: [{ provider: "p1", id: "m1", name: "Model One", reasoning: true, thinking: { efforts: ["low", "high", "bogus"] }, apiKey: "SECRET", headers: { Authorization: "x" } }] } });
     if (cmd.type === "set_model" || cmd.type === "set_thinking_level") out({ type: "response", id: cmd.id, command: cmd.type, success: true });
     if (cmd.type === "get_state") out({ type: "response", id: cmd.id, command: "get_state", success: true, data: { sessionFile: file } });
     if (cmd.type === "prompt") {
@@ -157,7 +157,7 @@ describe("omp model selection", () => {
 
     const service = new OmpSessionService({ agentDir: join(root, "agent"), sessionRoot });
     const catalog = await service.listModels();
-    expect(catalog.models).toEqual([{ provider: "p1", id: "m1", name: "Model One", reasoning: true }]);
+    expect(catalog.models).toEqual([{ provider: "p1", id: "m1", name: "Model One", reasoning: true, thinkingLevels: ["off", "low", "high"] }]);
 
     const created = service.create({ projectPath: root });
     await service.setModel({ sessionId: created.id, provider: "p1", modelId: "m1" });

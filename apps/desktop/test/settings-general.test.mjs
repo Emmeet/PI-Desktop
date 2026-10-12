@@ -460,7 +460,7 @@ test("settings rail uses short parallel labels and descriptive page titles", () 
     "settings.nav.ai",
     "settings.nav.shortcuts",
     "settings.nav.instructions",
-    "settings.nav.models",
+    "settings.nav.roles",
     "settings.nav.skills",
     "settings.nav.mcp",
     "settings.nav.subagents",
@@ -474,7 +474,7 @@ test("settings rail uses short parallel labels and descriptive page titles", () 
     assert.match(zhTWLocaleSource, new RegExp(`${key.split(".").at(-1)}:`));
     assert.match(trLocaleSource, new RegExp(`${key.split(".").at(-1)}:`));
   }
-  assert.match(settingsSearchSource, /titleKey: "settings\.configuration"/);
+  assert.match(settingsSearchSource, /titleKey: "settings\.rolesTitle"/);
   assert.match(settingsSearchSource, /titleKey: "settings\.projectArchive"/);
   assert.match(settingsPageSource, /activeTitleKey/);
   assert.match(settingsPageSource, /titleKey: entry\.titleKey/);

@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useAppStore } from "../../../stores/app-store";
 import type { SessionSummary } from "@pi-desktop/shared";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
 import { IconCheck, IconChevronDown } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { api, type OmpRole } from "../../../lib/api";
 import { OMP_MODEL_EVENT } from "./OmpModelPicker";
+
+const THINKING_SUFFIX = /:(off|minimal|low|medium|high|xhigh|max)$/;
+
+/** omp role values may carry a thinking level: "provider/model:high". */
+export function splitRoleModel(value: string): { model: string; thinking?: string } {
+  const match = THINKING_SUFFIX.exec(value);
+  return match ? { model: value.slice(0, match.index), thinking: match[1] } : { model: value };
+}
 
 let sharedRoles: Promise<OmpRole[]> | undefined;
 export function loadOmpRoles(refresh = false): Promise<OmpRole[]> {
@@ -33,6 +43,8 @@ export function OmpRolePicker({
   onSessionChanged: () => void;
   showToast: (message: string, options?: { variant?: "error" | "info" | "success" }) => void;
 }) {
+  const { t } = useTranslation();
+  const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const [open, setOpen] = useState(false);
   const [roles, setRoles] = useState<OmpRole[] | null>(null);
   const [current, setCurrent] = useState<string | null>(null);
@@ -46,17 +58,23 @@ export function OmpRolePicker({
   useEffect(() => { if (open) refresh(true); }, [open, refresh]);
 
   const sessionModel = session?.providerId && session?.modelId ? `${session.providerId}/${session.modelId}` : null;
-  const matched = roles?.find((r) => r.id === current && r.model && (!sessionModel || r.model === sessionModel))
-    ?? (sessionModel ? roles?.find((r) => r.model === sessionModel) : undefined);
-  const label = matched ? matched.name : "Role";
+  const base = (r: OmpRole) => (r.model ? splitRoleModel(r.model).model : null);
+  const matched = roles?.find((r) => r.id === current && r.model && (!sessionModel || base(r) === sessionModel))
+    ?? (sessionModel ? roles?.find((r) => base(r) === sessionModel) : undefined);
+  const label = matched ? matched.id : t("chat.ompRole");
 
   const apply = async (role: OmpRole) => {
     if (!role.model) return;
-    const slash = role.model.indexOf("/");
-    const provider = role.model.slice(0, slash);
-    const modelId = role.model.slice(slash + 1);
+    const { model, thinking } = splitRoleModel(role.model);
+    const slash = model.indexOf("/");
+    const provider = model.slice(0, slash);
+    const modelId = model.slice(slash + 1);
     try {
       const result = await api.ompSetModel({ sessionId: session?.id, provider, modelId });
+      if (thinking) {
+        // omp may not accept every level for every model; keep the model switch either way.
+        await api.ompSetThinking({ sessionId: session?.id, level: thinking === "max" ? "xhigh" : thinking }).catch(() => undefined);
+      }
       setCurrent(role.id);
       window.dispatchEvent(new CustomEvent(OMP_MODEL_EVENT, { detail: { provider, modelId } }));
       if (result.session) onSessionChanged();
@@ -72,8 +90,8 @@ export function OmpRolePicker({
       className="composer-model-thinking"
       open={open}
       onClose={() => setOpen(false)}
-      menuClassName="composer-model-menu"
-      label="omp role"
+      menuClassName="composer-model-menu omp-model-menu"
+      label={t("chat.ompRole")}
       role="menu"
       align="end"
       side="top"
@@ -82,15 +100,15 @@ export function OmpRolePicker({
           ref={ref}
           type="button"
           className={`icon-btn composer-model-thinking-chip ${open ? "active" : ""}`}
-          tooltip={matched ? `omp role @${matched.id} → ${matched.model}` : "Switch omp role"}
-          ariaLabel={`omp role: ${label}`}
+          tooltip={matched ? `${matched.id} → ${matched.model}` : t("chat.ompRole")}
+          ariaLabel={`${t("chat.ompRole")}: ${label}`}
           aria-haspopup="menu"
           aria-expanded={open}
           data-omp-role-picker="true"
           disabled={controlsBlocked}
           onClick={() => { onCloseOtherMenus(); setOpen((v) => !v); }}
         >
-          <span className="composer-model-thinking-model">@{matched ? matched.id : "role"}</span>
+          <span className="composer-model-thinking-model">{label}</span>
           <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
         </TooltipButton>
       )}
@@ -99,9 +117,6 @@ export function OmpRolePicker({
         <div className="composer-model-list">
           {!roles && !error ? <div className="composer-model-empty">Loading omp roles…</div> : null}
           {error ? <div className="composer-model-empty">{error}</div> : null}
-          {roles && assigned.length === 0 ? (
-            <div className="composer-model-empty">No omp roles have a model yet. Assign them in Settings → omp roles.</div>
-          ) : null}
           {assigned.map((role) => {
             const active = matched?.id === role.id;
             return (
@@ -115,7 +130,7 @@ export function OmpRolePicker({
                 onClick={() => void apply(role)}
               >
                 <span className="composer-model-option-main">
-                  <span className="composer-model-label">@{role.id}{role.name !== role.id ? ` · ${role.name}` : ""}</span>
+                  <span className="composer-model-label">{role.id}</span>
                   <span className="composer-model-option-meta">{role.model}</span>
                 </span>
                 {active ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
@@ -123,6 +138,15 @@ export function OmpRolePicker({
             );
           })}
         </div>
+        <button
+          type="button"
+          role="menuitem"
+          data-omp-manage-roles="true"
+          className="composer-plus-item composer-menu-entry"
+          onClick={() => { setOpen(false); setSettingsTab("agent"); }}
+        >
+          {t("chat.manageRoles")}
+        </button>
       </div>
     </AnchoredMenu>
   );

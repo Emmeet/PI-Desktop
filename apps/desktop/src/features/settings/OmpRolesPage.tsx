@@ -3,21 +3,26 @@ import { api, type OmpRole } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
 import { Button } from "../../components/ui";
 import { loadCatalog } from "../chat/composer/OmpModelPicker";
-import { loadOmpRoles } from "../chat/composer/OmpRolePicker";
+import { loadOmpRoles, splitRoleModel } from "../chat/composer/OmpRolePicker";
 import { SettingsCard, SettingsRow } from "./primitives";
 
 type Model = { provider: string; id: string; name: string };
 
-function ModelSelect({ value, models, onChange, testId }: { value: string; models: Model[]; onChange: (v: string) => void; testId: string }) {
+function ModelSelect({ value: full, models, onChange, testId }: { value: string; models: Model[]; onChange: (v: string) => void; testId: string }) {
+  // Keep a role's ":thinking" suffix when only the model changes.
+  const { model: value, thinking } = splitRoleModel(full);
   const known = models.some((m) => `${m.provider}/${m.id}` === value);
   return (
-    <select className="settings-select" data-omp-role-model={testId} value={value} onChange={(e) => onChange(e.target.value)}>
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+    <select className="settings-select" data-omp-role-model={testId} value={value} onChange={(e) => onChange(e.target.value && thinking ? `${e.target.value}:${thinking}` : e.target.value)}>
       <option value="">(not set)</option>
       {value && !known ? <option value={value}>{value}</option> : null}
       {models.map((m) => (
         <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>{m.provider}/{m.id}</option>
       ))}
     </select>
+    {thinking ? <span className="text-sm" data-omp-role-thinking={testId}>{thinking}</span> : null}
+    </span>
   );
 }
 
@@ -64,7 +69,7 @@ export function OmpRolesPage() {
         {error ? <SettingsRow title="Error">{error}</SettingsRow> : null}
         {!roles && !error ? <SettingsRow title="Loading…">{null}</SettingsRow> : null}
         {roles?.map((role) => (
-          <SettingsRow key={role.id} title={`@${role.id}${role.name !== role.id ? ` · ${role.name}` : ""}`} description={role.builtin ? "Built-in omp role" : "Custom role"}>
+          <SettingsRow key={role.id} title={`${role.id}${role.name !== role.id ? ` · ${role.name}` : ""}`} description={role.builtin ? "Built-in omp role" : "Custom role"}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }} data-omp-role-row={role.id}>
               <ModelSelect testId={role.id} value={role.model ?? ""} models={models} onChange={(v) => void save(role.id, v || null)} />
               {!role.builtin ? (
@@ -72,7 +77,7 @@ export function OmpRolesPage() {
                   variant="ghost"
                   data-omp-role-delete={role.id}
                   disabled={busy}
-                  onClick={() => { if (window.confirm(`Delete omp role @${role.id}?`)) void save(role.id, null); }}
+                  onClick={() => { if (window.confirm(`Delete omp role ${role.id}?`)) void save(role.id, null); }}
                 >
                   Delete
                 </Button>

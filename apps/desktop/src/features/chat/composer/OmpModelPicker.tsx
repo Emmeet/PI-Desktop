@@ -2,12 +2,22 @@ import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SessionThinkingLevel } from "@pi-desktop/shared";
 import { AnchoredMenu } from "../../../components/settings/AnchoredMenu";
-import { IconBot, IconCheck, IconChevronDown, IconSearch } from "../../../components/icons";
+import { IconBot, IconSparkles, IconCheck, IconChevronDown, IconSearch } from "../../../components/icons";
 import { TooltipButton } from "../../../components/ui";
 import { api } from "../../../lib/api";
-import { ThinkingLevelSlider } from "./ThinkingLevelSlider";
 
-type OmpModel = { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number };
+type OmpModel = { provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; thinkingLevels?: string[] };
+
+const LEVEL_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Highest supported level not above the requested one (omp's own clamp rule). */
+export function clampLevel(requested: string, levels: string[]): string {
+  if (levels.includes(requested)) return requested;
+  const index = LEVEL_ORDER.indexOf(requested);
+  let best = levels[0] ?? "off";
+  for (const level of levels) if (LEVEL_ORDER.indexOf(level) <= index) best = level;
+  return best;
+}
 type Catalog = Awaited<ReturnType<typeof api.ompListModels>>;
 
 export const OMP_MODEL_EVENT = "omp-desktop:model-applied";
@@ -47,6 +57,7 @@ export function OmpModelPicker({
   showToast: (message: string, options?: { variant?: "error" | "info" | "success" }) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [levelOpen, setLevelOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -97,6 +108,9 @@ export function OmpModelPicker({
       const result = await api.ompSetModel({ sessionId: session?.id, provider: model.provider, modelId: model.id });
       setDraftModel({ provider: model.provider, modelId: model.id });
       if (catalog) setCatalog({ ...catalog, selected: { provider: model.provider, modelId: model.id } });
+      const levels = model.thinkingLevels ?? [];
+      const clamped = levels.length ? clampLevel(thinkingLevel, levels) : null;
+      if (clamped && clamped !== thinkingLevel) await commitThinking(clamped as SessionThinkingLevel);
       if (result.session) onSessionChanged();
       setOpen(false);
     } catch (error) {
@@ -116,15 +130,65 @@ export function OmpModelPicker({
     }
   };
 
-  const levels = (catalog?.thinkingLevels ?? ["off", "minimal", "low", "medium", "high", "xhigh"]) as SessionThinkingLevel[];
+  const levels = selectedInfo?.thinkingLevels ?? [];
+
+  const shownLevel = levels.length ? clampLevel(thinkingLevel, levels) : null;
 
   return (
+    <>
+    {levels.length > 0 && shownLevel ? (
+      <AnchoredMenu
+        className="composer-model-thinking"
+        open={levelOpen}
+        onClose={() => setLevelOpen(false)}
+        menuClassName="composer-model-menu omp-thinking-menu"
+        label={t("chat.reasoningLevel")}
+        role="menu"
+        align="end"
+        side="top"
+        trigger={(ref) => (
+          <TooltipButton
+            ref={ref}
+            type="button"
+            className={`icon-btn composer-model-thinking-chip ${levelOpen ? "active" : ""}`}
+            tooltip={`${t("chat.reasoningLevel")}: ${shownLevel}`}
+            ariaLabel={`${t("chat.reasoningLevel")}: ${shownLevel}`}
+            aria-haspopup="menu"
+            aria-expanded={levelOpen}
+            data-omp-thinking-picker="true"
+            disabled={controlsBlocked}
+            onClick={() => { onCloseOtherMenus(); setOpen(false); setLevelOpen((v) => !v); }}
+          >
+            <span className="composer-model-thinking-icon" aria-hidden="true"><IconSparkles size={14} /></span>
+            <span className="composer-model-thinking-model">{shownLevel}</span>
+            <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
+          </TooltipButton>
+        )}
+      >
+        <div className="composer-menu-root" data-omp-thinking-list="true">
+          {levels.map((level) => (
+            <button
+              key={level}
+              type="button"
+              role="menuitemradio"
+              aria-checked={level === shownLevel}
+              data-omp-thinking={level}
+              className={`composer-plus-item composer-model-option ${level === shownLevel ? "active" : ""}`}
+              onClick={async () => { if (await commitThinking(level as SessionThinkingLevel)) setLevelOpen(false); }}
+            >
+              <span className="composer-model-label">{level}</span>
+              {level === shownLevel ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
+            </button>
+          ))}
+        </div>
+      </AnchoredMenu>
+    ) : null}
     <AnchoredMenu
       className="composer-model-thinking"
       open={open}
       onClose={() => setOpen(false)}
-      menuClassName="composer-model-menu composer-model-thinking-menu"
-      label={`${t("chat.model")} ${t("chat.reasoningLevel")}`}
+      menuClassName="composer-model-menu omp-model-menu"
+      label={t("chat.model")}
       role="menu"
       align="end"
       side="top"
@@ -134,26 +198,21 @@ export function OmpModelPicker({
           ref={ref}
           type="button"
           className={`icon-btn composer-model-thinking-chip ${open ? "active" : ""}`}
-          tooltip={`${selected ? `${selected.provider}/${selected.modelId}` : modelLabel} · ${t("chat.reasoningLevel")}: ${thinkingLevel}`}
-          ariaLabel={`${t("chat.model")}: ${modelLabel}. ${t("chat.reasoningLevel")}: ${thinkingLevel}`}
+          tooltip={selected ? `${selected.provider}/${selected.modelId}` : modelLabel}
+          ariaLabel={`${t("chat.model")}: ${modelLabel}`}
           aria-haspopup="menu"
           aria-expanded={open}
           data-omp-model-picker="true"
           disabled={controlsBlocked}
           onClick={() => {
             onCloseOtherMenus();
+            setLevelOpen(false);
             if (!open) setQuery("");
             setOpen((current) => !current);
           }}
         >
           <span className="composer-model-thinking-icon" aria-hidden="true"><IconBot size={14} /></span>
           <span className="composer-model-thinking-model">{modelLabel}</span>
-          {thinkingLevel !== "off" ? (
-            <>
-              <span className="composer-model-thinking-dot" aria-hidden="true">·</span>
-              <span className="composer-model-thinking-level">{thinkingLevel}</span>
-            </>
-          ) : null}
           <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
         </TooltipButton>
       )}
@@ -204,7 +263,7 @@ export function OmpModelPicker({
                     <span className="composer-model-option-main">
                       <span className="composer-model-label">{model.name}</span>
                       <span className="composer-model-option-meta">
-                        {model.name !== model.id ? model.id : provider}
+                        {model.id}
                         {ctx ? <span className="composer-model-option-ctx"> · {ctx}</span> : null}
                       </span>
                     </span>
@@ -215,16 +274,8 @@ export function OmpModelPicker({
             </div>
           ))}
         </div>
-        {selectedInfo?.reasoning !== false ? (
-          <ThinkingLevelSlider
-            key={`${selected?.provider}:${selected?.modelId}`}
-            levels={levels}
-            level={thinkingLevel}
-            label={t("chat.reasoningLevel")}
-            commit={commitThinking}
-          />
-        ) : null}
       </div>
     </AnchoredMenu>
+    </>
   );
 }

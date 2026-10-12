@@ -592,7 +592,7 @@ export const api = {
     })),
   ompListModels: (refresh = false) =>
     invoke<{
-      models: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; input?: string[] }>;
+      models: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; input?: string[]; thinkingLevels?: string[] }>;
       defaultModel: { provider: string; modelId: string } | null;
       selected: { provider: string; modelId: string } | null;
       thinkingLevel: string | null;

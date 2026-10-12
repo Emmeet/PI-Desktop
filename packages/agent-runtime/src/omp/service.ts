@@ -85,9 +85,11 @@ export type OmpModelInfo = {
   reasoning: boolean;
   contextWindow?: number;
   input?: string[];
+  /** Levels omp accepts for this model ("off" first); empty when reasoning is not controllable. */
+  thinkingLevels: string[];
 };
 
-export const OMP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const OMP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 function stableId(path: string): string {
   return `${NATIVE_PI_SESSION_PREFIX}${createHash("sha256").update(path).digest("base64url").slice(0, 24)}`;
@@ -384,7 +386,12 @@ export class OmpSessionService {
 
   /** Model a brand-new chat starts with: remembered choice, then env, then omp's default. */
   newSessionModel(): OmpModelRef | undefined {
-    return this.prefs().model ?? envModelOverride();
+    const saved = this.prefs().model;
+    if (saved) {
+      const suffix = /:(off|minimal|low|medium|high|xhigh|max)$/.exec(saved.modelId);
+      return suffix ? { provider: saved.provider, modelId: saved.modelId.slice(0, suffix.index) } : saved;
+    }
+    return envModelOverride();
   }
 
   private modelFields(record: SessionRecord, file: OmpSessionFile | undefined): { providerId?: string; modelId?: string } {
@@ -528,6 +535,9 @@ export class OmpSessionService {
           id: model.id,
           name: typeof model.name === "string" && model.name ? model.name : model.id,
           reasoning: model.reasoning === true,
+          thinkingLevels: model.reasoning === true && Array.isArray(model.thinking?.efforts) && model.thinking.efforts.length > 0
+            ? ["off", ...model.thinking.efforts.filter((e: unknown): e is string => typeof e === "string" && (OMP_THINKING_LEVELS as readonly string[]).includes(e))]
+            : [],
           ...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
           ...(Array.isArray(model.input) ? { input: model.input.filter((value: unknown) => typeof value === "string") } : {}),
         }));
@@ -544,7 +554,9 @@ export class OmpSessionService {
 
   /** Choose the model for a session (or, without one, for new chats); remembered across restarts. */
   async setModel(input: { sessionId?: string; provider: string; modelId: string }): Promise<SessionSummary | null> {
-    const model = { provider: input.provider, modelId: input.modelId };
+    // Role values look like "provider/model:high"; the level is not part of the model id.
+    const suffix = /:(off|minimal|low|medium|high|xhigh|max)$/.exec(input.modelId);
+    const model = { provider: input.provider, modelId: suffix ? input.modelId.slice(0, suffix.index) : input.modelId };
     this.savePrefs({ model });
     if (!input.sessionId) return null;
     const record = this.record(input.sessionId);

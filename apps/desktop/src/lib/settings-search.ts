@@ -163,8 +163,8 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
   },
   {
     id: "agent",
-    labelKey: "settings.nav.models",
-    titleKey: "settings.configuration",
+    labelKey: "settings.nav.roles",
+    titleKey: "settings.rolesTitle",
     group: "agent",
     keywordKeys: [
       "settings.providers",
