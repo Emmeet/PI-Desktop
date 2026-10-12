@@ -11,12 +11,20 @@ export const KEYBOARD_SHORTCUT_IDS = [
   "openWorkPanel",
   "abort",
   "toggleWindow",
+  "newWindow",
+  "focusChatWindow",
   "resetZoom",
   "zoomIn",
   "zoomOut",
   "toggleFullScreen",
   "voiceToggle",
   "voiceCancel",
+  "ompCycleThinking",
+  "ompCycleModel",
+  "ompCycleModelBackward",
+  "ompSelectModel",
+  "ompRetry",
+  "ompInterrupt",
 ] as const;
 
 export type KeyboardShortcutId = (typeof KEYBOARD_SHORTCUT_IDS)[number];
@@ -56,6 +64,8 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcutDefinition[] = [
   { id: "openWorkPanel", group: "navigation", defaultBinding: "Mod+J" },
   { id: "abort", group: "agent", defaultBinding: "Mod+Period" },
   { id: "toggleWindow", group: "window", defaultBinding: "Alt+Shift+W" },
+  { id: "newWindow", group: "window", defaultBinding: "Mod+Shift+N" },
+  { id: "focusChatWindow", group: "window", defaultBinding: "Alt+Shift+O" },
   { id: "resetZoom", group: "window", defaultBinding: "Mod+0" },
   { id: "zoomIn", group: "window", defaultBinding: "Mod+Equal" },
   { id: "zoomOut", group: "window", defaultBinding: "Mod+Minus" },
@@ -75,6 +85,14 @@ export const KEYBOARD_SHORTCUTS: readonly KeyboardShortcutDefinition[] = [
     group: "agent",
     defaultBinding: "Escape",
   },
+  // Mirrors of omp's TUI defaults (app.thinking.cycle, app.model.cycleForward,
+  // app.model.select, app.retry). They only act in an omp chat.
+  { id: "ompCycleThinking", group: "agent", defaultBinding: "Shift+Tab" },
+  { id: "ompCycleModel", group: "agent", defaultBinding: "Ctrl+P" },
+  { id: "ompCycleModelBackward", group: "agent", defaultBinding: "Ctrl+Shift+P" },
+  { id: "ompSelectModel", group: "agent", defaultBinding: "Alt+M" },
+  { id: "ompRetry", group: "agent", defaultBinding: "F5" },
+  { id: "ompInterrupt", group: "agent", defaultBinding: "Escape" },
 ] as const;
 
 /**

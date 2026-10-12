@@ -33,6 +33,7 @@ import { useSidebarTransition } from "./useSidebarTransition";
 import { useStartupWatchdog } from "./useStartupWatchdog";
 import { useTraySessions } from "./useTraySessions";
 import { runLiveVoiceShortcut } from "../voice/live/live-voice-shortcuts";
+import { isOmpShortcut, runOmpShortcut } from "../omp/OmpHotkeys";
 
 const MODIFIER_ONLY_KEYS = new Set([
   "Alt",
@@ -680,6 +681,8 @@ export function useAppShellRuntime() {
           revealImportedProjects ? { revealImportedProjects: true } : undefined,
         )
         .then(async () => {
+          // Refresh every window's catalog, but navigation belongs to the focused chat.
+          if (!document.hasFocus()) return;
           if (event.projectPath) {
             await useAppStore.getState().openProjectPath(event.projectPath);
           } else if (event.projectPath === null && !event.selectSessionId) {
@@ -718,8 +721,8 @@ export function useAppShellRuntime() {
     );
     const onKey = (e: KeyboardEvent) => {
       const modifierOnly = MODIFIER_ONLY_KEYS.has(e.key);
-      if (modifierOnly || e.isComposing || e.keyCode === 229) return;
-      const shortcut = KEYBOARD_SHORTCUTS.find((candidate) =>
+      if (modifierOnly || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+      const matchingShortcuts = KEYBOARD_SHORTCUTS.filter((candidate) =>
         keybindingMatchesEvent(
           resolveKeybinding(
             candidate,
@@ -730,6 +733,7 @@ export function useAppShellRuntime() {
           platform as ShortcutPlatform,
         ),
       );
+      const shortcut = matchingShortcuts[0];
       if (!shortcut) {
         const pluginShortcut = plugins
           .filter((plugin) => isActiveInProject(plugin, projectPath))
@@ -762,6 +766,14 @@ export function useAppShellRuntime() {
       }
       if (shortcut.id === "voiceToggle" || shortcut.id === "voiceCancel") {
         if (runLiveVoiceShortcut(shortcut.id)) e.preventDefault();
+        else {
+          const ompShortcut = matchingShortcuts.find((candidate) => isOmpShortcut(candidate.id));
+          if (ompShortcut && runOmpShortcut(ompShortcut.id, e.target, e)) e.preventDefault();
+        }
+        return;
+      }
+      if (isOmpShortcut(shortcut.id)) {
+        if (runOmpShortcut(shortcut.id, e.target, e)) e.preventDefault();
         return;
       }
       e.preventDefault();
@@ -800,6 +812,12 @@ export function useAppShellRuntime() {
           }
           case "abort":
             void abort();
+            break;
+          case "newWindow":
+            void api.newChatWindow().catch((error) => showToast(String(error), { variant: "error" }));
+            break;
+          case "focusChatWindow":
+            void api.focusChatWindow().catch((error) => showToast(String(error), { variant: "error" }));
             break;
           case "toggleWindow":
             // The same native action the menu item runs (D438): hide the window

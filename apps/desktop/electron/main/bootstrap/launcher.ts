@@ -44,7 +44,7 @@ export function hostGlobalShortcutBindings(): string[] {
   return [...hostGlobalBindings.values()];
 }
 
-function recordHostGlobalBinding(id: string, binding: string | null): void {
+export function recordHostGlobalBinding(id: string, binding: string | null): void {
   if (binding) hostGlobalBindings.set(id, binding);
   else hostGlobalBindings.delete(id);
 }

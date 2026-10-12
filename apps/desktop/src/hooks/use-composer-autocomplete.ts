@@ -164,9 +164,13 @@ export function useComposerAutocomplete({
   enabled: boolean;
 }) {
   const workspaceKey = useAppStore((s) => s.workspace?.path ?? "");
+  const sessionId = useAppStore((s) => s.activeSessionId);
+  const fileSourceKey = `${workspaceKey}\0${sessionId ?? ""}`;
+  const showToast = useAppStore((s) => s.showToast);
   const hasWorkspace = workspaceKey !== "";
   const [commands, setCommands] = useState<ComposerCommand[] | null>(null);
   const [files, setFiles] = useState<{
+    key: string;
     entries: FsIndexEntry[];
     truncated: boolean;
   } | null>(null);
@@ -221,44 +225,47 @@ export function useComposerAutocomplete({
       };
     }
     if (!hasWorkspace) {
-      setFiles({ entries: [], truncated: false });
+      setFiles({ key: fileSourceKey, entries: [], truncated: false });
       return;
     }
     if (
       filesCache &&
-      filesCache.key === workspaceKey &&
+      filesCache.key === fileSourceKey &&
       now - filesCache.at < SOURCE_TTL_MS
     ) {
-      setFiles({ entries: filesCache.entries, truncated: filesCache.truncated });
+      setFiles({ key: fileSourceKey, entries: filesCache.entries, truncated: filesCache.truncated });
       return;
     }
     let cancelled = false;
     void api
-      .fsIndex()
+      .fsIndex(sessionId)
       .then((res) => {
         filesCache = {
-          key: workspaceKey,
+          key: fileSourceKey,
           at: Date.now(),
           entries: res.entries,
           truncated: res.truncated,
         };
-        if (!cancelled) setFiles({ entries: res.entries, truncated: res.truncated });
+        if (!cancelled) setFiles({ key: fileSourceKey, entries: res.entries, truncated: res.truncated });
       })
-      .catch(() => {
-        if (!cancelled) setFiles({ entries: [], truncated: false });
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setFiles({ key: fileSourceKey, entries: [], truncated: false });
+          showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace]);
+  }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace, fileSourceKey, sessionId, showToast]);
 
   const items = useMemo<AutocompleteItem[]>(() => {
     if (!trigger || dismissed) return [];
     if (trigger.mode === "slash") {
       return commands ? filterCommands(commands, trigger.query, trigger.tokenStart > 0) : [];
     }
-    return files ? filterFiles(files.entries, trigger.query) : [];
-  }, [trigger, dismissed, commands, files]);
+    return files?.key === fileSourceKey ? filterFiles(files.entries, trigger.query) : [];
+  }, [trigger, dismissed, commands, files, fileSourceKey]);
 
   // New query or mode restarts keyboard navigation at the top hit.
   const itemsKey = trigger ? `${trigger.mode}:${trigger.query}` : "";
@@ -268,7 +275,7 @@ export function useComposerAutocomplete({
 
   const sourceReady =
     !!trigger &&
-    (trigger.mode === "slash" ? commands !== null : files !== null);
+    (trigger.mode === "slash" ? commands !== null : files?.key === fileSourceKey);
   const open = !!trigger && !dismissed && sourceReady;
 
   const close = useCallback(() => {

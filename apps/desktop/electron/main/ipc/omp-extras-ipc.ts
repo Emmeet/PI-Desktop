@@ -8,12 +8,14 @@
  *   stores the token where omp looks it up (url-keyed credential).
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { app, BrowserWindow, dialog, shell } from "electron";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { IPC, type ComposerCommand } from "@pi-desktop/shared";
 import type { IpcRegistrar } from "./types";
+import { bunBinary, ompPackageDir, runOmp, runOmpConfig } from "../omp-capability-sync";
 
 export const MCP_OAUTH_HELPER = `
 const pkg = process.env.OMP_PKG_DIR;
@@ -111,7 +113,6 @@ export function cancelOmpMcpOAuth(): boolean {
 export async function runOmpMcpOAuth(url: string, onEvent: (event: OmpMcpOAuthEvent) => void): Promise<void> {
   if (!/^https?:\/\//i.test(url)) throw Object.assign(new Error("Enter the server's http(s) URL"), { errorCode: "INVALID_ARGUMENT" });
   if (running) throw Object.assign(new Error("Another MCP sign-in is in progress"), { errorCode: "AGENT_BUSY" });
-  const { ompPackageDir, bunBinary } = await import("../omp-capability-sync");
   const pkg = ompPackageDir();
   if (!pkg) throw new Error("omp's install folder was not found, so MCP sign-in is unavailable");
   const dir = mkdtempSync(join(tmpdir(), "omp-mcp-oauth-"));
@@ -159,27 +160,149 @@ export async function runOmpMcpOAuth(url: string, onEvent: (event: OmpMcpOAuthEv
   });
 }
 
+const oneOf = (...values: string[]) => (value: unknown) => values.includes(String(value));
+const bool = (value: unknown) => typeof value === "boolean";
+const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10_000_000;
+const themeName = (value: unknown) => typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value);
+
 /** omp settings the renderer may read and change, with their allowed values. */
 const OMP_SETTINGS: Record<string, (value: unknown) => boolean> = {
-  "memory.backend": (value) => ["off", "local", "hindsight", "mnemopi", "sharpshooter"].includes(String(value)),
-  "memories.enabled": (value) => typeof value === "boolean",
+  "memory.backend": oneOf("off", "local", "hindsight", "mnemopi", "sharpshooter"),
+  "memories.enabled": bool,
+  "theme.dark": themeName,
+  "theme.light": themeName,
+  symbolPreset: oneOf("unicode", "nerd", "ascii"),
+  "composer.predictions": bool,
+  "spelling.autocomplete": oneOf("off", "auto", "ngram", "smollm", "apple"),
+  "providers.cacheWarming": oneOf("off", "streaming", "idle"),
+  "providers.anthropic.slowMode": oneOf("off", "auto"),
+  "git.enabled": bool,
+  "lsp.enabled": bool,
+  "lsp.lazy": bool,
+  "lsp.shared": bool,
+  "lsp.formatOnWrite": bool,
+  "lsp.diagnosticsOnWrite": bool,
+  "lsp.diagnosticsOnEdit": bool,
+  "lsp.diagnosticsDeduplicate": bool,
+  "commit.mapReduceEnabled": bool,
+  "commit.mapReduceThreshold": count,
+  "commit.mapBatchTokenBudget": count,
+  "commit.cacheEnabled": bool,
+  "commit.cacheTtlDays": count,
+  "commit.changelogMaxDiffChars": count,
 };
+
+/** omp's bundled TUI themes (pi-tui), with `vars` references resolved. */
+function ompThemeDir(): string | null {
+  const base = ompPackageDir();
+  if (!base) return null;
+  for (const candidate of [join(base, "..", "pi-tui", "src", "theme", "defaults"), join(base, "node_modules", "@oh-my-pi", "pi-tui", "src", "theme", "defaults")]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function ompThemeNames(): string[] {
+  const dir = ompThemeDir();
+  if (!dir) return [];
+  return readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).sort();
+}
+
+export function ompThemePalette(name: string): Record<string, string> | null {
+  const dir = ompThemeDir();
+  if (!dir || !themeName(name)) return null;
+  try {
+    const theme = JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")) as { vars?: Record<string, unknown>; colors?: Record<string, unknown> };
+    const vars = theme.vars ?? {};
+    const resolve = (value: unknown, depth = 0): string | null => {
+      if (typeof value !== "string" || !value) return null;
+      if (/^#[0-9a-f]{3,8}$/i.test(value)) return value;
+      return depth < 5 && value in vars ? resolve(vars[value], depth + 1) : null;
+    };
+    const palette: Record<string, string> = {};
+    for (const key of ["accent", "border", "borderAccent", "success", "error", "warning", "muted"]) {
+      const color = resolve(theme.colors?.[key]);
+      if (color) palette[key] = color;
+    }
+    return palette;
+  } catch {
+    return null;
+  }
+}
 
 export function registerOmpExtrasIpc({
   registrar,
   getSidecar,
+  sendToRenderer,
 }: {
   registrar: IpcRegistrar;
   getSidecar?: () => { call<T = unknown>(method: string, params?: unknown): Promise<T> } | null | undefined;
+  sendToRenderer?: (channel: string, payload: unknown) => void;
 }): void {
   registrar.handle(IPC.invoke.ompConfigGet, async () => {
-    const { runOmpConfig } = await import("../omp-capability-sync");
+    // One `omp config list` instead of a process per key; only allow-listed
+    // keys ever leave the main process (the list also holds auth settings).
+    const listed = JSON.parse(await runOmp(["config", "list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
     const values: Record<string, unknown> = {};
     for (const key of Object.keys(OMP_SETTINGS)) {
-      const raw = (await runOmpConfig(["get", key]).catch(() => "")).trim();
-      values[key] = raw === "true" ? true : raw === "false" ? false : raw;
+      if (listed[key] && "value" in listed[key]) values[key] = listed[key].value;
     }
     return { values };
+  });
+
+  registrar.handle(IPC.invoke.ompThemes, async () => {
+    const names = ompThemeNames();
+    const palettes: Record<string, Record<string, string>> = {};
+    for (const name of names) {
+      const palette = ompThemePalette(name);
+      if (palette) palettes[name] = palette;
+    }
+    return { names, palettes };
+  });
+  // A dialog-selected, successfully generated file is the entire grant; no filesystem root is widened.
+  const savedHtml = new Map<string, string>();
+  for (const channel of [IPC.invoke.ompOpenExport, IPC.invoke.ompRevealExport]) {
+    registrar.handleWithEvent(channel, async (event, input: unknown) => {
+      (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
+      const path = input && typeof input === "object" && "path" in input ? input.path : undefined;
+      if (typeof path !== "string" || !isAbsolute(path)) throw Object.assign(new Error("Export path is not authorized"), { errorCode: "PERMISSION_DENIED" });
+      const canonical = savedHtml.get(resolve(path));
+      if (!canonical || await realpath(path) !== canonical) throw Object.assign(new Error("Export path is not authorized"), { errorCode: "PERMISSION_DENIED" });
+      if (channel === IPC.invoke.ompOpenExport) {
+        const failure = await shell.openPath(canonical);
+        if (failure) throw new Error(failure);
+      } else shell.showItemInFolder(canonical);
+      return { ok: true };
+    });
+  }
+
+  registrar.handleWithEvent(IPC.invoke.ompExportHtml, async (event, input: { sessionId?: string; title?: string } = {}) => {
+    (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
+    const sessionId = input?.sessionId;
+    if (typeof sessionId !== "string" || !sessionId.trim() || /[\u0000-\u001f\u007f]/.test(sessionId)) throw Object.assign(new Error("sessionId is required"), { errorCode: "INVALID_ARGUMENT" });
+    const safe = String(input?.title ?? "omp-session").replace(/[\\/:*?"<>|\n\r]+/g, " ").trim().slice(0, 80) || "omp-session";
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner || owner.isDestroyed()) throw new Error("chat window unavailable");
+    const choice = await dialog.showSaveDialog(owner, {
+      defaultPath: join(app.getPath("downloads"), `${safe}.html`),
+      filters: [{ name: "HTML", extensions: ["html"] }],
+    });
+    if (choice.canceled || !choice.filePath) return { path: null };
+    if (!isAbsolute(choice.filePath)) throw new Error("Export destination must be an absolute local path");
+    if (owner.isDestroyed() || event.sender.isDestroyed()) return { path: null };
+    const sidecar = getSidecar?.();
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    const reply = await sidecar.call<{ result?: { path?: string } }>("omp.session.command", {
+      sessionId,
+      command: { type: "export_html", outputPath: choice.filePath },
+    });
+    const path = reply?.result?.path;
+    if (typeof path !== "string" || resolve(path) !== resolve(choice.filePath)) throw new Error("OMP returned an unexpected HTML export destination");
+    const html = await readFile(path, "utf8");
+    if (!/<(?:!doctype\s+html|html)(?:\s|>)/i.test(html)) throw new Error("OMP did not create an HTML document");
+    savedHtml.set(resolve(path), await realpath(path));
+    if (!owner.isDestroyed()) shell.showItemInFolder(path);
+    return { path };
   });
 
   registrar.handle(IPC.invoke.ompConfigSet, async (input: { key?: string; value?: unknown } = {}) => {
@@ -188,15 +311,17 @@ export function registerOmpExtrasIpc({
     if (!valid || !valid(input?.value)) {
       throw Object.assign(new Error(`Not an allowed omp setting: ${key}`), { errorCode: "INVALID_ARGUMENT" });
     }
-    const { runOmpConfig } = await import("../omp-capability-sync");
     await runOmpConfig(["set", key, String(input.value)]);
     // Idle chats restart with the new setting on their next message.
-    await getSidecar?.()?.call("omp.runtimes.recycle", {}).catch(() => undefined);
-    return { ok: true };
+    await getSidecar?.()?.call("omp.runtimes.recycle", {});
+    const listed = JSON.parse(await runOmp(["config", "list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
+    const value = listed[key]?.value;
+    if (!valid(value)) throw new Error("OMP returned an invalid setting value after saving");
+    sendToRenderer?.(IPC.event.ompEvent, { method: "omp.config.changed", params: { key, value } });
+    return { ok: true, value };
   });
 
   registrar.handle(IPC.invoke.ompUsageStats, async () => {
-    const { runOmp } = await import("../omp-capability-sync");
     const text = await runOmp(["stats", "--json"], { timeoutMs: 60_000, maxBuffer: 32 << 20 });
     const data = JSON.parse(text) as Record<string, unknown>;
     // The time series are large and only the dashboard uses them.
@@ -204,7 +329,7 @@ export function registerOmpExtrasIpc({
   });
 
   registrar.handleWithEvent(IPC.invoke.ompRevertEdit, async (event, input: { path?: string; oldText?: string; newText?: string } = {}) => {
-    registrar.assertMainWindowSender(event);
+    (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
     const path = String(input?.path ?? "");
     if (!path || !isAbsolute(path) || typeof input?.oldText !== "string" || typeof input?.newText !== "string") {
       throw Object.assign(new Error("Nothing to revert"), { errorCode: "INVALID_ARGUMENT" });

@@ -12,4 +12,5 @@ export type IpcRegistrar = {
     handler: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<any>,
   ): void;
   assertMainWindowSender(event: IpcMainInvokeEvent): void;
+  assertChatWindowSender?(event: IpcMainInvokeEvent): void;
 };

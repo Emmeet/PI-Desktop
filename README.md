@@ -832,6 +832,30 @@ scripts/run-omp-desktop.sh                       # add OMP_DESKTOP_NO_SANDBOX=1 
 - **Fork** uses omp's `fork`. **Rename** uses `set_session_name`. **Delete**
   asks for confirmation, then removes the session's `.jsonl` file (only inside
   omp's sessions folder) and its artifacts folder.
+- **Conversation actions** open Goal, BTW, Handoff, Loop, and Share panels. Goal
+  follows OMP's lifecycle and token budget. BTW restores side-question history
+  and can be cancelled. Handoff compacts this same conversation. Loop repeats
+  the chosen prompt 1–50 times, stops on failure/abort, and is owned by the
+  runtime rather than the selected tab.
+- **Share** saves OMP's HTML export locally, including a separate escaped
+  appendix for Desktop-only slash-command output. Open, reveal, and copy the
+  saved path explicitly; nothing uploads automatically.
+- **Native tools** provide primary-screen capture, file/URL opening, and text
+  clipboard access through OMP host-tool/URI requests. Each operation asks for
+  explicit native consent. Cancelling a request or disposing its session stops
+  pending work; it does not grant future access.
+- **File mentions**: type `@` and select a project file. The input shows an
+  atomic chip, while OMP receives the exact path (quoted when it contains spaces).
+  Switching sessions never keeps a stale project's suggestion list.
+- **Settings → OMP preferences** controls OMP themes, local word completion,
+  cache warming, slow defaults, LSP, Git and commit settings. Optional theme
+  accent linkage follows Light/Dark/System without replacing the app layout.
+  Cache warming may cost tokens; OMP next-message prediction is distinct from
+  the local `predict_word` completion shown in the input.
+- **Windows and hotkeys**: Mod+Shift+N opens another chat window; Alt+Shift+O
+  focuses a chat globally. OMP bindings include Ctrl+P/Ctrl+Shift+P model cycling,
+  Shift+Tab thinking cycling, Alt+M model selection, F5 retry and Escape interrupt.
+  Customize them in Shortcuts. Menus, dialogs and IME retain their own keys.
 - Models, logins, tools, extensions, and compaction all come from omp itself.
 
 ### Environment variables
@@ -849,9 +873,9 @@ error that includes these install instructions.
 
 ### Current limitations
 
-- Permission modes, plan mode, the subagent panel, voice, and desktop
-  plugins/MCP servers do not control omp, so they are hidden or have no effect.
-  omp's tools run without desktop approval prompts.
+- OMP Live Voice / STT / TTS integration is not included in this P2 change.
+- Desktop plugin panels and browser ownership remain attached to the primary
+  window; secondary chat windows do not bypass their security boundary.
 - After a reload, images in older messages show as file chips rather than
   inline previews.
 - Edit and Regenerate leave the earlier session file on disk. The app hides it
@@ -859,3 +883,14 @@ error that includes these install instructions.
 - The Rust host service still starts for settings and projects, and the
   embedded pi packages are still in the dependency tree, but they are not used
   to run agents.
+
+### OMP Desktop P2 changes
+
+- Added local HTML sharing, goal/BTW/handoff/finite loops, native host tools,
+  OMP preference/theme linkage, configurable hotkeys and independent chat windows.
+- Preserved slash-command output across conversation reopening and restart
+  without adding it to model context; excluded private authentication/config copy.
+- Removed orphan/nested subagent rows through spawning-tool ownership, while
+  preserving genuine cancelled zero-tool agents.
+- Replaced the MCP menu's timed second-click removal with explicit confirmation
+  and retryable errors. Completed OMP copy in all nine shipped languages.

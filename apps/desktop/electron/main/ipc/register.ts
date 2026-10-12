@@ -43,6 +43,7 @@ import type { LiveVoiceWidget } from "../live-voice/widget-window";
 import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 import type { createTaskbarUnreadBadge } from "../taskbar-unread-badge";
+import { chatWindows, createChatWindow } from "../chat-windows";
 
 export type RegisterIpcDependencies = {
   isQuitting: () => boolean;
@@ -209,11 +210,12 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     );
   };
   const assertMainWindowSender = (event: IpcMainInvokeEvent): void => {
-    if (event.sender.id !== getMainWindow()?.webContents.id) {
+    if (event.sender.id !== getMainWindow()?.webContents.id || event.senderFrame !== getMainWindow()?.webContents.mainFrame) {
       throw Object.assign(new Error("renderer is not the main window"), {
         errorCode: "PERMISSION_DENIED",
       });
     }
+    chatWindows.sender(event);
   };
 
   const optionalWorkspaceRoot = async (): Promise<string | null> => {
@@ -234,7 +236,26 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     handle,
     handleWithEvent,
     assertMainWindowSender,
+    assertChatWindowSender: (event) => { chatWindows.sender(event); },
   };
+
+  const openChatWindow = async () => {
+    const window = await createChatWindow(safeOpenExternal, (error) => logger.app("diagnostics", "error", "chat window failed", { data: String(error) }));
+    return { windowId: window.id };
+  };
+  registrar.handleWithEvent(IPC.invoke.newChatWindow, async (event) => {
+    chatWindows.sender(event);
+    return openChatWindow();
+  });
+  registrar.handleWithEvent(IPC.invoke.focusChatWindow, async (event) => {
+    chatWindows.sender(event);
+    const window = chatWindows.focused();
+    if (!window) return openChatWindow();
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    return { windowId: window.id };
+  });
 
   registerAppIpc({
     registrar,
@@ -281,7 +302,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     acquireSessionOperation,
     stripWinLongPrefix,
   });
-  registerOmpExtrasIpc({ registrar, getSidecar });
+  registerOmpExtrasIpc({ registrar, getSidecar, sendToRenderer });
   registerSettingsIpc({
     registrar,
     getHost,

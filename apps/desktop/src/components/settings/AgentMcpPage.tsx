@@ -24,7 +24,6 @@ import {
   matchesCapabilitySearch,
   projectDisplayName,
   useAgentProjects,
-  useArmedDelete,
   type CapabilityFilter,
   type CapabilityMenuItem,
 } from "./AgentCapabilityLayout";
@@ -48,7 +47,8 @@ import {
   IconTerminal,
   IconTrash,
 } from "../icons";
-import { TooltipButton, cx } from "../ui";
+import { Button, TooltipButton, cx } from "../ui";
+import { OmpDialog } from "../../features/omp/OmpDialog";
 
 const GLOBAL_MCP_PATH = "~/.agents/servers";
 
@@ -131,7 +131,12 @@ export function AgentMcpPage() {
     };
   }, []);
   const [view, setView] = useState<"servers" | "market">("servers");
-  const { armed, setArmed } = useArmedDelete();
+  const [removeTarget, setRemoveTarget] = useState<{
+    server: McpServerRecord;
+    level: AgentCapabilityLevel;
+    projectPath?: string;
+  } | null>(null);
+  const removingRef = useRef(false);
 
   const rowKey = (level: AgentCapabilityLevel, id: string) => `${level}:${id}`;
   const levelQuery = (level: AgentCapabilityLevel) => ({
@@ -328,20 +333,24 @@ export function AgentMcpPage() {
     }
   };
 
-  const remove = async (server: McpServerRecord, level: AgentCapabilityLevel) => {
+  const remove = async () => {
+    if (!removeTarget || removingRef.current) return;
+    const { server, level, projectPath } = removeTarget;
     const key = rowKey(level, server.id);
+    removingRef.current = true;
     setBusyId(key);
     try {
-      await api.removeMcpServer(server.id, levelQuery(level));
+      await api.removeMcpServer(server.id, { level, ...(projectPath ? { projectPath } : {}) });
       await load();
       showToast(t("settings.capabilityDeleted", { name: server.label || server.id }), {
         variant: "success",
       });
+      setRemoveTarget(null);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), { variant: "error" });
     } finally {
+      removingRef.current = false;
       setBusyId(null);
-      setArmed(null);
     }
   };
 
@@ -432,7 +441,6 @@ export function AgentMcpPage() {
     const busy = busyId === key;
     const testing = testingId === server.id;
     const authorizing = authorizingId === server.id;
-    const isArmed = armed === key;
     const isHttp = server.transport === "http";
     const hasAuthHeader = Boolean(
       server.headers &&
@@ -495,16 +503,12 @@ export function AgentMcpPage() {
         : []),
       {
         key: "remove",
-        label: isArmed ? t("settings.capabilityRemoveConfirm") : t("extensions.mcp.remove"),
+        label: t("extensions.mcp.remove"),
         icon: <IconTrash size={14} />,
         danger: true,
         onSelect: () => {
-          if (isArmed) {
-            setMenuFor(null);
-            void remove(server, level);
-          } else {
-            setArmed(key);
-          }
+          setMenuFor(null);
+          setRemoveTarget({ server, level, ...(level === "project" && selectedProjectPath ? { projectPath: selectedProjectPath } : {}) });
         },
       },
     ];
@@ -580,7 +584,6 @@ export function AgentMcpPage() {
               open={menuFor === key}
               onOpenChange={(open) => {
                 setMenuFor(open ? key : null);
-                if (!open) setArmed(null);
               }}
             />
             <CapabilityToggle
@@ -639,6 +642,21 @@ export function AgentMcpPage() {
 
   return (
     <>
+    {removeTarget ? (
+      <OmpDialog
+        title={t("settings.mcpRemoveTitle")}
+        icon={<IconTrash size={15} />}
+        onClose={() => { if (!removingRef.current) setRemoveTarget(null); }}
+        footer={
+          <>
+            <Button autoFocus disabled={busyId !== null} onClick={() => setRemoveTarget(null)}>{t("common.cancel")}</Button>
+            <Button className="danger" disabled={busyId !== null} onClick={() => void remove()}>{t("extensions.mcp.remove")}</Button>
+          </>
+        }
+      >
+        <p>{t("settings.mcpRemoveBody", { name: removeTarget.server.label || removeTarget.server.id, level: t(removeTarget.level === "global" ? "settings.globalLevel" : "settings.projectLevel") })}</p>
+      </OmpDialog>
+    ) : null}
     {pendingAuth ? (
       <div className="omp-mcp-auth" role="status" data-mcp-oauth-pending="true">
         <strong>{t("extensions.mcp.authorizing")} · {pendingAuth.serverName}</strong>

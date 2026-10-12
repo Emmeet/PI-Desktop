@@ -31,6 +31,7 @@ import type { HostProcess } from "../host-process";
 import { syncPluginDisplayLocale } from "../plugin-display-locale";
 import { createPowerSaveBlockerController } from "../keep-awake";
 import type { PluginAppearance } from "../../shared/plugin-panel-chrome";
+import { applyFocusChatShortcut, chatWindows } from "../chat-windows";
 
 export type ApplicationLifecycleState = {
   windowCreationPromise: Promise<void> | null;
@@ -211,9 +212,15 @@ export function createApplicationLifecycle({
    * and quits nothing — the tray (or the same key again) is the way back.
    */
   function toggleMainWindow() {
-    const window = state.mainWindow;
+    const window = chatWindows.focused() ?? state.mainWindow;
     if (window && !window.isDestroyed() && windowToggleAction(window) === "hide") {
       window.hide();
+      return;
+    }
+    if (window && window !== state.mainWindow && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
       return;
     }
     restoreMainWindow();
@@ -371,13 +378,13 @@ export function createApplicationLifecycle({
 
   async function deliverApplicationMenuCommand(command: AppMenuCommand) {
     await ensureWindow();
-    const window = state.mainWindow;
+    const window = chatWindows.focused() ?? state.mainWindow;
     if (!window || window.isDestroyed()) return;
-    if (!(await waitForMenuRenderer(window))) return;
+    if (window === state.mainWindow && !(await waitForMenuRenderer(window))) return;
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
-    sendToRenderer(IPC.event.menuCommand, { command });
+    window.webContents.send(IPC.event.menuCommand, { command });
   }
 
   function dispatchApplicationMenuCommand(command: AppMenuCommand) {
@@ -395,7 +402,7 @@ export function createApplicationLifecycle({
 
   function executeNativeMenuAction(
     action: NativeMenuAction,
-    target: BrowserWindow | null = state.mainWindow,
+    target: BrowserWindow | null = chatWindows.focused() ?? state.mainWindow,
   ) {
     if (action === "restoreMainWindow" || action === "toggleMainWindow") {
       if (action === "restoreMainWindow") restoreMainWindow();
@@ -606,6 +613,7 @@ export function createApplicationLifecycle({
     );
     applyPluginLauncherShortcut(keybindings);
     applyToggleWindowShortcut(keybindings);
+    applyFocusChatShortcut(keybindings, ensureWindow, (error) => logger.app("diagnostics", "warn", "global chat shortcut failed", { data: String(error) }));
     const devMode = settings?.developerMode === true;
     const signature = JSON.stringify({ locale, keybindings, devMode });
     if (appState.appliedMenuSettings === signature) return;

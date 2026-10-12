@@ -41,6 +41,7 @@ import {
 } from "../window-native-corners";
 import { applyMainWindowBackground, mainWindowBackgroundOptions } from "../window-background";
 import { recoverRendererAfterGone } from "../renderer-recovery";
+import { chatWindows } from "../chat-windows";
 
 function windowsIconPath(): string | undefined {
   if (process.platform !== "win32") return undefined;
@@ -226,6 +227,7 @@ export async function createWindow({
     },
   });
   const window = windowState.mainWindow;
+  chatWindows.add(window);
   if (process.platform === "win32") {
     if (windows11NativeCorners) {
       await installWindows11CornerController(

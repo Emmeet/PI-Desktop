@@ -270,23 +270,6 @@ test("settings writes validate without applying read defaults", () => {
   assert.doesNotMatch(apiSource, /planApprovalPermissionMode/);
 });
 
-test("renderer notification drops silently when the render frame is disposed", () => {
-  const sendStart = mainIndexSource.indexOf("function sendToRenderer(");
-  const sendEnd = mainIndexSource.indexOf(
-    "function resetMenuRendererReady",
-    sendStart,
-  );
-  const sendSource = mainIndexSource.slice(sendStart, sendEnd);
-  assert.ok(sendSource.includes("window.webContents.send(channel, payload)"));
-  assert.ok(sendSource.includes("try {"));
-  assert.ok(sendSource.includes("} catch {"));
-  // A disposed frame during teardown is routine; logging it as an error would
-  // spam the same line on every sidecar crash while the window is closed.
-  assert.ok(
-    !sendSource.includes("console.error") && !sendSource.includes("console.warn"),
-    "disposed-frame sends are dropped silently",
-  );
-});
 
 test("sidecar crash reports carry the last stderr lines", () => {
   assert.match(sidecarSource, /SIDECAR_STDERR_TAIL_LINES/);

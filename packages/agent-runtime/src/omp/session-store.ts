@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ContextCompactionRecord, UiMessage } from "@pi-desktop/shared";
+import { mergeOmpCommandOutputs, readOmpCommandOutputs } from "./command-output-store.js";
 
 /** Parsed view of one omp session file (`~/.omp/agent/sessions/<cwd>/<ts>_<id>.jsonl`). */
 export type OmpSessionFile = {
@@ -16,6 +17,9 @@ export type OmpSessionFile = {
   /** omp fast mode (a priority/ultrafast service tier) recorded in the file. */
   fast?: boolean;
   messages: UiMessage[];
+  /** Tree identity is needed to keep output anchored to metadata off other branches. */
+  branchIds: string[];
+  leafId: string | null;
   /** omp compaction entries on the active branch, shown as transcript rows. */
   compactions: ContextCompactionRecord[];
 };
@@ -116,7 +120,11 @@ export function projectMessage(
   return undefined;
 }
 
-export function parseOmpSession(path: string, text = readFileSync(path, "utf8")): OmpSessionFile | undefined {
+export function parseOmpSession(
+  path: string,
+  text = readFileSync(path, "utf8"),
+  options: { commandOutputs?: boolean; commandSessionId?: string } = {},
+): OmpSessionFile | undefined {
   const entries: Entry[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -198,7 +206,9 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
     ...model,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(fast !== undefined ? { fast } : {}),
-    messages,
+    branchIds: branch.map((entry) => entry.id),
+    leafId: leaf?.id ?? null,
+    messages: options.commandOutputs === false ? messages : mergeOmpCommandOutputs(messages, readOmpCommandOutputs(options.commandSessionId ?? header.id), new Set(branch.map((entry) => entry.id)), branch.map((entry) => entry.id)),
     compactions,
   };
 }

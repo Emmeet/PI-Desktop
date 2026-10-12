@@ -649,9 +649,18 @@ export const api = {
   ompConfigGet: () =>
     invoke<{ values: Record<string, unknown> }>(IPC.invoke.ompConfigGet, {}),
   ompConfigSet: (key: string, value: unknown) =>
-    invoke<{ ok: boolean }>(IPC.invoke.ompConfigSet, { key, value }),
+    invoke<{ ok: boolean; value: unknown }>(IPC.invoke.ompConfigSet, { key, value }),
   ompUsageStats: () =>
     invoke<OmpUsageStats>(IPC.invoke.ompUsageStats, {}),
+  ompThemes: () =>
+    invoke<{ names: string[]; palettes: Record<string, Record<string, string>> }>(IPC.invoke.ompThemes, {}),
+  ompExportHtml: (input: { sessionId: string; title?: string }) =>
+    invoke<{ path: string | null }>(IPC.invoke.ompExportHtml, input),
+  ompOpenExport: (path: string) => invoke<{ ok: boolean }>(IPC.invoke.ompOpenExport, { path }),
+  ompRevealExport: (path: string) => invoke<{ ok: boolean }>(IPC.invoke.ompRevealExport, { path }),
+  /** One allow-listed omp RPC command for a session (export_html, goal, btw, …). */
+  ompSessionCommand: <T = unknown>(sessionId: string | undefined, command: Record<string, unknown> & { type: string }) =>
+    invoke<{ result: T }>(IPC.invoke.ompCall, { method: "omp.session.command", params: { sessionId, command } }).then((reply) => reply.result),
   ompRevertEdit: (input: { path: string; oldText: string; newText: string }) =>
     invoke<{ ok: boolean; alreadyReverted?: boolean }>(IPC.invoke.ompRevertEdit, input),
   onOmpEvent: (listener: (event: { method: string; params: any }) => void) => {
@@ -1497,7 +1506,7 @@ export const api = {
   fsReveal: (path: string) => invoke(IPC.invoke.fsReveal, { path }),
   fsOpen: (path: string, mimeType?: string) =>
     invoke(IPC.invoke.fsOpen, { path, mimeType }),
-  fsIndex: () => invoke<FsIndexResult>(IPC.invoke.fsIndex),
+  fsIndex: (sessionId?: string) => invoke<FsIndexResult>(IPC.invoke.fsIndex, sessionId ? { sessionId } : {}),
   /**
    * Complete a file reference from chat text to a real file (D320 follow-up).
    * The main process owns the root order — project, session scratch,
@@ -1527,6 +1536,8 @@ export const api = {
     ),
   windowControl: (action: WindowControlAction) =>
     invoke<{ maximized: boolean }>(IPC.invoke.windowControl, { action }),
+  newChatWindow: () => invoke<{ windowId: number }>(IPC.invoke.newChatWindow, {}),
+  focusChatWindow: () => invoke<{ windowId: number }>(IPC.invoke.focusChatWindow, {}),
   getCloseBehavior: () =>
     invoke<{ behavior: CloseBehavior; supported: boolean }>(
       IPC.invoke.closeBehaviorGet,

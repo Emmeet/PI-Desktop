@@ -1792,3 +1792,46 @@ retries and images retain physical account/model attribution. Nested immediate
 parent and owning Task remain distinct. The migration does not add coding-agent
 AgentSession, Codemode or virtual routing. See the coding-agent design review for
 future adoption conditions.
+
+## OMP Desktop P2 fork amendment
+
+On `feat/omp-support`, [omp-native-sessions](../../adr/omp-native-sessions.md)
+supersedes the embedded-Pi execution sections above. OMP remains the sole engine;
+the desktop adds UI and narrowly scoped native capabilities, not another agent.
+
+- Session commands are allow-listed. Stateful `goal`, `btw`, `handoff`, slow-mode
+  and cache-warming operations retain the conversation's RPC process and forward
+  its real response data and events. Handoff compacts the same session; a saved
+  handoff artifact is not a new resumable session. Cancellation is not success.
+- Goal uses `get/create/pause/resume/drop` and optional positive `token_budget`.
+  BTW restores history, correlates streamed records/questions, supports follow-up
+  topics, and cancels its owned request when its dialog closes or navigation
+  changes. A late result must not update another conversation.
+- Finite loops belong to the session runtime, with integer counts 1–50. Only a
+  successful, settled matching iteration schedules another prompt. Errors,
+  explicit abort/stop and sidecar shutdown stop continuation. Renderer reload
+  and session selection do not transfer ownership or duplicate prompts; restart
+  does not automatically resume paid work.
+- Slash-command output that OMP does not journal is written before publication
+  to the desktop's private command-output directory. Invocation identity groups
+  multi-frame output with one command input; active-branch anchors prevent output
+  from other branches leaking into the transcript. Empty command-only sessions
+  have desktop manifests, not fabricated OMP files. Authentication/configuration
+  output is excluded. Storage failures remain observable. The per-output 64 KiB
+  persistence limit remains. This history never becomes model context.
+- HTML export calls OMP `export_html` and adds an escaped desktop-command-output
+  appendix. Only a successful native save-dialog destination grants open/reveal
+  access; arbitrary paths and symlink redirections are rejected. Sharing is local
+  HTML and path copying only, with no upload or public URL.
+- Host tools register before prompts: primary-display screenshot, safe HTTP(S)
+  or absolute-file opening, and text clipboard read/write. `clipboard://` and
+  `clipboard://text` are the only host URI endpoints. Each native operation needs
+  explicit desktop consent, independently of OMP approval defaults. Cancellation
+  is scoped to process, session and request; disposed owners receive no late reply.
+- Subagent rows require a known root spawning tool-call owner. Early events wait
+  for that ownership; nested, orphan and unknown terminal frames create no row.
+  Genuine owned zero-tool cancellations remain visible.
+- Word completion uses `predict_word` and acceptance feedback on the managed
+  utility backend. IME, slash/file palettes, stale drafts/cursors/session/settings,
+  and consumed/repeated keys must not apply suggestions. Settings recycle idle
+  runtimes safely and defer active/pending work rather than interrupting turns.

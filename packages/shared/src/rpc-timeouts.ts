@@ -91,7 +91,10 @@ export function rpcTimeoutMs(
   if (method === "agent.compact") return AGENT_COMPACT_RPC_TIMEOUT_MS;
   if (method === "configSync.syncNow") return CONFIG_SYNC_RPC_TIMEOUT_MS;
   if (method === "tools.execute") return undefined;
+  // Host results finish a user-approved request; the bridge owns cancellation.
+  if (method === "omp.host.respond") return undefined;
   // OAuth logins wait on the user in a browser.
   if (method === "omp.login.start") return 11 * 60_000;
+  if (method === "omp.session.command") return 11 * 60_000;
   return DEFAULT_RPC_TIMEOUT_MS;
 }

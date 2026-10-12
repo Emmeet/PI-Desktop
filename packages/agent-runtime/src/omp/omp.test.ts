@@ -73,6 +73,7 @@ process.stdin.on("data", (chunk) => {
     if (process.env.FAKE_OMP_LOG) fs.appendFileSync(process.env.FAKE_OMP_LOG, JSON.stringify({ cmd: cmd.type, provider: cmd.provider, modelId: cmd.modelId, level: cmd.level, argv: process.argv.slice(2) }) + "\\n");
     if (cmd.type === "get_available_models") out({ type: "response", id: cmd.id, command: cmd.type, success: true, data: { models: [{ provider: "p1", id: "m1", name: "Model One", reasoning: true, thinking: { efforts: ["low", "high", "bogus"] }, apiKey: "SECRET", headers: { Authorization: "x" } }] } });
     if (cmd.type === "set_model" || cmd.type === "set_thinking_level") out({ type: "response", id: cmd.id, command: cmd.type, success: true });
+    if (["set_ask_dialog", "set_subagent_subscription", "set_host_tools", "set_host_uri_schemes", "set_fast_mode"].includes(cmd.type)) out({ type: "response", id: cmd.id, command: cmd.type, success: true });
     if (cmd.type === "get_state") out({ type: "response", id: cmd.id, command: "get_state", success: true, data: { sessionFile: file } });
     if (cmd.type === "prompt") {
       out({ type: "response", id: cmd.id, command: "prompt", success: true });

@@ -544,6 +544,16 @@ async function handle(method: string, params: any): Promise<unknown> {
       };
     case "omp.tree":
       return (await loadOmp()).ompSessionService().tree(String(params.sessionId ?? ""));
+    case "omp.session.command": {
+      const command = params.command && typeof params.command === "object" ? (params.command as Record<string, unknown>) : {};
+      const sessionId = typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined;
+      return { result: await (await loadOmp()).ompSessionService().sessionCommand(sessionId, { ...command, type: String(command.type ?? "") }, (envelope) => notify("native.agent.event", envelope)) };
+    }
+    case "omp.host.respond": {
+      const frame = params.frame && typeof params.frame === "object" ? (params.frame as Record<string, unknown>) : {};
+      (await loadOmp()).ompSessionService().hostRespond(String(params.sessionId ?? ""), { ...frame, type: String(frame.type ?? "") });
+      return { ok: true };
+    }
     case "omp.stats":
       return { stats: await (await loadOmp()).ompSessionService().sessionStats(String(params.sessionId ?? "")) };
     case "omp.login.providers":
@@ -575,7 +585,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       return { enabled: (await loadOmp()).ompSessionService().setPlanMode(String(params.sessionId ?? ""), params.enabled === true) };
     }
     case "omp.runtimes.recycle": {
-      (await loadOmp()).ompSessionService().recycleIdle();
+      await (await loadOmp()).ompSessionService().recycleIdle();
       return { ok: true };
     }
     case "omp.thinking.set": {

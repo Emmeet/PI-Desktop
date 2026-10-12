@@ -897,8 +897,16 @@ export function registerWorkspaceIpc({
     return { ok: true };
   });
 
-  handle(IPC.invoke.fsIndex, async () => {
-    const root = await optionalWorkspaceRoot();
+  handle(IPC.invoke.fsIndex, async (input: { sessionId?: string } = {}) => {
+    let root: string | null;
+    if (input.sessionId?.startsWith("native-pi:")) {
+      const sidecar = getSidecar();
+      if (!sidecar) throw new Error("sidecar unavailable");
+      const detail = await sidecar.call<{ session?: { projectPath?: string } }>("native.session.get", { id: input.sessionId, messageLimit: 1 });
+      root = detail.session?.projectPath ?? null;
+    } else {
+      root = await optionalWorkspaceRoot();
+    }
     if (!root) return { entries: [], truncated: false };
     return getWorkspaceFileIndex(root);
   });

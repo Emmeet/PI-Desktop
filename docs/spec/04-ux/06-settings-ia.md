@@ -986,3 +986,34 @@ the current window width:
 | Card radius | ~14px elevated stroke |
 | Toggle | **32×20** thumb 16, neutral accent on (not green) |
 | Open-target pill | leading VS Code glyph |
+
+## OMP Desktop P2 fork preferences
+
+The `feat/omp-support` fork adds an **OMP preferences** destination, searchable
+with theme, input, provider, LSP, Git and commit keywords. Controls use the shared
+settings primitives and all nine shipped catalogs, including Simplified Chinese.
+
+- Theme dark/light names come from OMP's bundled themes. Optional accent linkage
+  follows the desktop's resolved dark/light mode and restores prior accent/hover/
+  soft/focus tokens when disabled. Config changes refresh existing windows; late
+  results cannot overwrite a newer theme choice.
+- Input settings distinguish OMP's billed next-message `composer.predictions`
+  from local `spelling.autocomplete` word completion. The latter offers off, auto,
+  n-gram, SmolLM and macOS-only Apple dictionary. First-use model downloads and
+  possible provider/cache-warming costs are disclosed rather than implied free.
+- Provider settings expose cache warming off/streaming/idle and Anthropic slow
+  defaults. Cache changes also apply to the selected native session; the session
+  action menu offers current-model slow on/off. Actual RPC/config readback wins
+  over submitted values. Active turn disposal is deferred safely.
+- LSP exposes enabled/lazy/shared, format-on-write and diagnostic policies. Git
+  exposes enabled. Commit exposes map/reduce, batch budgets and cache controls.
+  These write allow-listed OMP configuration, not a duplicate Desktop model.
+- MCP service **Remove** opens a named, localized confirmation. Cancel preserves
+  configuration; confirm is locked while pending. Failure keeps the dialog and
+  server available for retry. It removes configuration, not files on disk, and
+  captures the original management level/project instead of following later UI
+  changes. No short-lived timed second-click arm is used for this action.
+- New window is available from the conversation menu or Mod+Shift+N. The global
+  focus-chat key defaults to Alt+Shift+O. OMP reasoning/model/retry/interrupt keys
+  are editable in Shortcuts and use OMP defaults without overriding active IME,
+  menus, dialogs, already-consumed keys or repeated keydown events.

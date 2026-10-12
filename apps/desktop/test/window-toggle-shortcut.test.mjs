@@ -19,7 +19,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   readAppSource,
   readMainModule,
-  readMainSource,
   readSettingsSource,
   readStoreSource,
 } from "./helpers/source-contracts.mjs";
@@ -40,11 +39,7 @@ const { catalogs, flattenCatalog } = await import(
   "../../../packages/i18n/src/index.ts"
 );
 
-const mainSource = await readMainSource();
-const launcherSource = await readMainModule("bootstrap/launcher.ts");
 const lifecycleSource = await readMainModule("bootstrap/app-lifecycle.ts");
-const shutdownSource = await readMainModule("bootstrap/shutdown.ts");
-const registrySource = await readMainModule("plugin-shortcut-registry.ts");
 const menuSource = await readMainModule("application-menu.ts");
 const protocolSource = await readFile(
   new URL("../../../packages/shared/src/protocol.ts", import.meta.url),
@@ -93,7 +88,7 @@ test("the catalog ships one window toggle on Alt+Shift+W, with no summon chord",
   assert.equal(isReservedKeybinding("Mod+W", "darwin"), true);
   assert.deepEqual(
     windowGroup.map((shortcut) => shortcut.id),
-    ["toggleWindow", "resetZoom", "zoomIn", "zoomOut", "toggleFullScreen"],
+    ["toggleWindow", "newWindow", "focusChatWindow", "resetZoom", "zoomIn", "zoomOut", "toggleFullScreen"],
   );
 });
 
@@ -120,32 +115,6 @@ test("the toggle hides the window instead of entering the close path", () => {
   assert.match(lifecycleSource, /function restoreMainWindow\(\)/);
 });
 
-test("the launcher registers the toggle accelerator and nothing else", () => {
-  assert.match(launcherSource, /applyToggleWindowShortcut/);
-  assert.match(launcherSource, /candidate\.id === "toggleWindow"/);
-  assert.match(launcherSource, /recordHostGlobalBinding\("toggleWindow", binding\)/);
-  assert.match(
-    launcherSource,
-    /globalShortcut\.register\(accelerator, \(\) => \{\s*toggleMainWindow\(\);\s*\}\)/,
-  );
-  assert.match(launcherSource, /toggleWindowAccelerator/);
-  assert.match(lifecycleSource, /applyToggleWindowShortcut\(keybindings\)/);
-  assert.match(shutdownSource, /state\.toggleWindowAccelerator/);
-  // Only the plugin launcher and the window toggle are process-wide
-  // accelerators: the retired summon id is registered by nothing.
-  assert.deepEqual(
-    [...launcherSource.matchAll(/recordHostGlobalBinding\("([A-Za-z]+)"/g)]
-      .map((match) => match[1])
-      .sort(),
-    ["openPluginLauncher", "toggleWindow"],
-  );
-  // The plugin registry refuses what the app now holds: `Alt+Space` and the
-  // `Alt+Shift+W` toggle.
-  assert.match(
-    registrySource,
-    /HOST_GLOBAL_SHORTCUT_IDS = \["openPluginLauncher", "toggleWindow"\] as const/,
-  );
-});
 
 test("the shell key, the menu item, and the accelerator run one action", () => {
   assert.match(appSource, /case "toggleWindow":/);

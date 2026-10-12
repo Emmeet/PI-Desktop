@@ -17268,3 +17268,29 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **Steps:** Save a 500K user context limit for a model whose catalog publishes 1M. Open the Composer model list, then send a short message and inspect context usage. Repeat with a catalog-owned limit and with discovery unavailable.
 - **Expected:** The user-configured row and context inspector show 500K; a catalog-owned row follows the published limit; a configured model without discovery retains its saved context label. Model selection remains unchanged.
 - **Status:** Automated unit regression in `apps/desktop/test/composer-models.test.mjs` covers user overrides, catalog inheritance, and missing discovery; the full save → picker → message → context-inspector path remains a manual validation scenario.
+
+## OMP Desktop P2 fork scenarios
+
+These branch-only scenarios use isolated profiles/projects/displays. Real provider
+requests are not implied by fixture IPC/JSONL tests; do not use a user's running
+Desktop or credentials. Voice (gap item 22) remains excluded.
+
+| Scenario | User sequence and expected result | Automated coverage |
+| --- | --- | --- |
+| OMP-P2-export-share | Cancel save; recover failed save; export HTML; open/reveal/copy only the chosen verified file. No upload or arbitrary path grant. | `omp-export-html.test.mjs`, `omp-session-actions-user-path.test.mjs`, runtime `omp-p2.test.ts` |
+| OMP-P2-session-actions | Set/pause/resume/drop goal and budget; restore/continue/cancel BTW; handoff refreshes the same session only on success. Late navigation results cannot affect another chat. | `omp-session-actions.test.mjs`, `omp-session-actions-user-path.test.mjs`, runtime `omp-p2.test.ts` |
+| OMP-P2-loop | Start a finite loop; switch/reload renderer; finish exactly the chosen iterations; stop on explicit abort/error and never resume automatically after sidecar shutdown. | runtime `omp-p2.test.ts`, `omp-session-actions-user-path.test.mjs` |
+| OMP-P2-native-tools | Approve/deny screenshot/open/clipboard and clipboard URI; reject malformed input; cancel pending work by owner and observe transport failures. Capture the actual primary display. | `omp-host-tools.test.mjs`; private-X native screenshot/clipboard smoke |
+| OMP-P2-file-mention | Type `@`, choose a spaced path, observe atomic chip and exact quoted send text. Switch projects while reads are pending; no stale paths. IME freezes filtering until commit. | `omp-file-mention-user-path.test.mjs` |
+| OMP-P2-preferences | Save/read back LSP/Git/commit/provider settings; dark/light theme change and disable restore tokens; react to config broadcasts. Accept local prediction once; reject stale/IME/palette/disabled results. | `omp-preferences.test.mjs`, `omp-word-prediction.test.mjs`, `omp-preferences-user-path.test.mjs` |
+| OMP-P2-windows-hotkeys | Open two independent chat renderers, route native controls to caller, broadcast config, close and clean ownership. Reject outsider/subframe senders. Customize OMP/global shortcuts and honor overlays/IME. | `omp-chat-windows.test.mjs`, `omp-hotkeys.test.mjs` |
+| OMP-P2-command-persistence | Run a multi-frame slash command, reselect/restart the original ID, then materialize its engine file; input/output stay grouped and branch-local. Private output never rehydrates. | runtime `command-output-store.test.ts`, `omp-p2.test.ts`; real isolated OMP smoke |
+| OMP-P2-subagent-ownership | Receive root/early/nested/orphan/terminal lifecycle frames; only owned root agents render. Genuine cancelled zero-tool agents remain visible. | runtime `omp-p2.test.ts` |
+| OMP-P2-mcp-remove | Choose Remove; named Chinese confirmation appears; Cancel preserves the server; double confirm cannot duplicate deletion; failed deletion stays retryable. | `omp-mcp-remove-user-path.test.mjs` |
+
+Specs: [OMP runtime amendment](../03-runtime/02-agent-runtime.md#omp-desktop-p2-fork-amendment),
+[OMP preferences](../04-ux/06-settings-ia.md#omp-desktop-p2-fork-preferences),
+[OMP decision](../../adr/omp-native-sessions.md#p2-desktop-integration-amendment).
+Status: automated boundaries and isolated renderer paths; physical global-key
+delivery, Windows/macOS screenshot permission and live provider-generated
+BTW/handoff/goal continuations require separate platform/provider authorization.

@@ -1,3 +1,4 @@
+import { cancelOmpHostRequests, handleOmpHostRequest } from "../omp-host-tools";
 import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
 import {
   findSubagentProviderSource,
@@ -240,7 +241,15 @@ export function createSidecarRuntime({
       if (message) sendToRenderer(IPC.event.toast, { message: `omp: ${message}` });
       return;
     }
-    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed") {
+    if (method === "native.host.request") {
+      void handleOmpHostRequest(s, params).catch((error) => logger.app("permission", "error", "omp host request failed", { data: String(error) }));
+      return;
+    }
+    if (method === "native.host.closed") {
+      if (params && typeof params === "object" && "sessionId" in params && typeof params.sessionId === "string") cancelOmpHostRequests(s, params.sessionId);
+      return;
+    }
+    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed" || method === "native.btw") {
       sendToRenderer(IPC.event.ompEvent, { method, params });
       return;
     }
@@ -347,6 +356,7 @@ export function createSidecarRuntime({
     // sidecar no longer relays it (agent-sidecar.setHost filters it out).
   });
   s.onExit(({ code, signal, intentional, stderrTail }) => {
+    cancelOmpHostRequests(s);
     if (runtimeState.sidecar !== s) return;
     logger.flushChild("agent");
     const interruptedToolCalls = [...activeToolCalls.values()];

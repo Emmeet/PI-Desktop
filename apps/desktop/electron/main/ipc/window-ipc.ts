@@ -99,7 +99,7 @@ export function registerWindowIpc({
   });
 
   handleWithEvent(IPC.invoke.windowSetBackgroundColor, async (event, input: unknown = {}) => {
-    registrar.assertMainWindowSender(event);
+    (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
     const theme = (input as { theme?: unknown })?.theme;
     if (!isThemeColorScheme(theme)) {
       throw Object.assign(new Error("invalid window background theme"), {
@@ -129,7 +129,7 @@ export function registerWindowIpc({
       });
     }
     if (process.platform === "darwin") return { applied: false, theme };
-    const mainWindow = getMainWindow();
+    const mainWindow = BrowserWindow.fromWebContents(event.sender);
     if (!mainWindow || mainWindow.isDestroyed()) {
       throw new Error("main window unavailable");
     }
@@ -156,14 +156,15 @@ export function registerWindowIpc({
     return { applied: true, theme, color, cornerRadius };
   });
 
-  handle(IPC.invoke.windowControl, async (input: { action?: string } = {}) => {
+  handleWithEvent(IPC.invoke.windowControl, async (event, input: { action?: string } = {}) => {
+    (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
     if (
       !input.action ||
       !WINDOW_CONTROL_ACTIONS.includes(input.action as WindowControlAction)
     ) {
       throw new Error("unsupported window control action");
     }
-    const mainWindow = getMainWindow();
+    const mainWindow = BrowserWindow.fromWebContents(event.sender);
     if (!mainWindow || mainWindow.isDestroyed()) return { maximized: false };
     switch (input.action as WindowControlAction) {
       case "getState":
@@ -206,21 +207,33 @@ export function registerWindowIpc({
   });
 
   handleWithEvent(IPC.invoke.menuRendererReady, async (event) => {
+    (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
     const window = BrowserWindow.fromWebContents(event.sender);
-    const mainWindow = getMainWindow();
-    if (!window || window !== mainWindow || !markMenuRendererReady(window)) {
-      throw new Error("menu renderer is not attached to the main window");
-    }
+    if (!window) throw new Error("menu renderer is not attached to a chat window");
+    if (window === getMainWindow() && !markMenuRendererReady(window)) throw new Error("main menu renderer is not ready");
     return { ready: true };
   });
 
-  handle(IPC.invoke.nativeMenuAction, async (input: { action?: string } = {}) => {
+  handleWithEvent(IPC.invoke.nativeMenuAction, async (event, input: { action?: string } = {}) => {
+    (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
     if (
       !input.action ||
       !NATIVE_MENU_ACTIONS.includes(input.action as NativeMenuAction)
     ) {
       throw new Error("unsupported native menu action");
     }
-    return executeNativeMenuAction(input.action as NativeMenuAction);
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) throw new Error("chat window unavailable");
+    if (window === getMainWindow()) return executeNativeMenuAction(input.action as NativeMenuAction);
+    switch (input.action) {
+      case "toggleMainWindow": window.hide(); break;
+      case "restoreMainWindow": window.show(); window.focus(); break;
+      case "toggleFullScreen": window.setFullScreen(!window.isFullScreen()); break;
+      case "resetZoom": window.webContents.setZoomLevel(0); break;
+      case "zoomIn": window.webContents.setZoomLevel(window.webContents.getZoomLevel() + 0.5); break;
+      case "zoomOut": window.webContents.setZoomLevel(window.webContents.getZoomLevel() - 0.5); break;
+      default: throw new Error("unsupported secondary window action");
+    }
+    return { maximized: window.isMaximized(), fullScreen: window.isFullScreen() };
   });
 }

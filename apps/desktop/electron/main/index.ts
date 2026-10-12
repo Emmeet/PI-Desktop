@@ -14,6 +14,7 @@ import {
   testNetworkProxy,
 } from "./network-proxy";
 import { installInsecureEndpointNotice } from "./network-notice";
+import { chatWindows } from "./chat-windows";
 import {
   APP_VERSION,
   IPC,
@@ -456,6 +457,7 @@ function setCurrentWorkspacePath(path: string | null): void {
   }
 }
 
+// Host-owned chat windows, never plugin panel/launcher web contents.
 /** Pull the user's MCP server records from host-core into the local runtime. */
 function sendToRenderer(channel: string, payload: unknown) {
   applicationLifecycle?.traySessions.observeEvent(channel, payload);
@@ -466,23 +468,7 @@ function sendToRenderer(channel: string, payload: unknown) {
     });
   }
   if (!IPC_WHITELIST.has(channel)) return;
-  const window = mainState.mainWindow;
-  if (
-    !window ||
-    window.isDestroyed() ||
-    window.webContents.isDestroyed()
-  ) {
-    return;
-  }
-  try {
-    window.webContents.send(channel, payload);
-  } catch {
-    // The renderer's main frame can be disposed — the window closed while the
-    // app keeps running (macOS dock, resident tray) or a teardown race where
-    // webContents.isDestroyed() has not flipped yet — before the send reaches
-    // it. Notifying a gone frame is routine teardown, never an error:
-    // supervision must keep running with no window attached.
-  }
+  chatWindows.broadcast(channel, payload);
 
 }
 

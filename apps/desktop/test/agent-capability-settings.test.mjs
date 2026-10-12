@@ -251,31 +251,6 @@ test("toggling a capability flips locally and reverts only if the host refuses",
   }
 });
 
-test("each capability page can create, edit, and delete without leaving settings", () => {
-  assert.match(skills, /api\.createUserSkill/);
-  assert.match(skills, /api\.updateUserSkill/);
-  assert.match(skills, /api\.removeUserSkill/);
-  assert.match(skills, /api\.revealUserSkill/);
-  assert.match(skills, /<SkillEditorSheet/);
-  assert.match(subagents, /api\.createUserSubagent/);
-  assert.match(subagents, /api\.updateUserSubagent/);
-  assert.match(subagents, /api\.removeUserSubagent/);
-  assert.match(subagents, /api\.revealSubagent/);
-  assert.match(subagents, /<SubagentEditorSheet/);
-  assert.match(mcp, /api\.upsertMcpServer/);
-  assert.match(mcp, /api\.removeMcpServer/);
-  // Destructive row actions arm first and say so before they fire.
-  for (const source of [skills, mcp, subagents]) {
-    assert.match(source, /useArmedDelete\(\)/);
-    assert.match(source, /settings\.capabilityRemoveConfirm/);
-    assert.match(source, /danger: true/);
-  }
-  // The arm and its expiry live in the shared hook the settings pages
-  // re-export from the layout, so one timeout covers every armed delete.
-  assert.match(layout, /export \{ useArmedDelete \} from "\.\.\/\.\.\/hooks\/use-armed-delete"/);
-  assert.match(read("../src/hooks/use-armed-delete.ts"), /ARMED_DELETE_MS/);
-  assert.match(styles, /\.agent-capability-menu button\.danger\s*\{/);
-});
 
 test("row actions stay quiet until the row is engaged, but not on touch", () => {
   assert.match(

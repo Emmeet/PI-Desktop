@@ -19,6 +19,7 @@ export type SettingsTabId =
   | "remoteHosts"
   | "voice"
   | "accounts"
+  | "ompPrefs"
   | "usage"
   | "about";
 
@@ -315,6 +316,13 @@ export const SETTINGS_NAV: SettingsNavEntry[] = [
     titleKey: "settings.ompAccounts.title",
     group: "agent",
     keywordKeys: ["settings.ompAccounts.signIn", "settings.ompAccounts.description"],
+  },
+  {
+    id: "ompPrefs",
+    labelKey: "settings.nav.ompPrefs",
+    titleKey: "settings.ompPrefs.title",
+    group: "agent",
+    keywordKeys: ["settings.ompPrefs.sections.lsp", "settings.ompPrefs.sections.git", "settings.ompPrefs.sections.commit", "settings.ompPrefs.appearance"],
   },
   {
     id: "usage",
