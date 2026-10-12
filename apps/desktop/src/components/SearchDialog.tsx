@@ -12,7 +12,6 @@ import { SearchSessionResults, type SearchRow } from "./SearchSessionResults";
 import type { SessionSummary, CommandItem } from "@pi-desktop/shared";
 import type { SessionMeta } from "../lib/sidebar-preferences";
 import {
-  IconAt,
   IconClock,
   IconNewSession,
   IconSearch,
@@ -23,7 +22,6 @@ import {
 /** Navigable pages surfaced by the global search alongside sessions. */
 const PAGE_ENTRIES = [
   { page: "scheduled", labelKey: "scheduled.title", icon: IconClock },
-  { page: "plugins", labelKey: "nav.plugins", icon: IconAt },
 ] as const;
 
 type PageEntry = (typeof PAGE_ENTRIES)[number];

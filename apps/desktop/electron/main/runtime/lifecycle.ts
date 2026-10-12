@@ -22,6 +22,8 @@ import { syncPluginDisplayLocale } from "../plugin-display-locale";
 import { RuntimeSupervisor } from "@pi-desktop/host-runtime";
 
 type RestartKind = "host" | "sidecar";
+const OMP_BUILTIN_PLUGIN_IDS = new Set(["pi.browser", "pi.file-manager"]);
+
 export type RuntimeLifecycleDependencies = {
   runtimeState: RuntimeState;
   dataDir: string;
@@ -258,6 +260,11 @@ export function createRuntimeLifecycle({
       const listed = await runtimeState.host!.call<{ plugins: any[] }>("plugins.list");
       rememberPluginScopes(listed.plugins ?? []);
       for (const plugin of listed.plugins ?? []) {
+        // OMP Desktop: only the bundled built-ins are restored; third-party
+        // plugins stay installed on disk but are not loaded.
+        if (!OMP_BUILTIN_PLUGIN_IDS.has(plugin.id) && process.env.OMP_DESKTOP_ALLOW_PLUGINS !== "1") {
+          continue;
+        }
         if (plugin.enabled && plugin.path) {
           try {
             await plugins.loadFromPath(plugin.path, plugin.permissions ?? [], {

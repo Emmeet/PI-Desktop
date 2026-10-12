@@ -1,4 +1,5 @@
 import { inheritedSessionModelBinding } from "../lib/session-model";
+import { loadCatalog as loadOmpCatalog } from "../features/chat/composer/OmpModelPicker";
 import {
   useEffect,
   useLayoutEffect,
@@ -400,6 +401,30 @@ export function Composer({
   // session, and omp chooses the model from its own config.
   // omp sessions (and new chats, which become omp sessions) use omp's catalog.
   const ompEngine = nativeSession || !activeSessionSummary;
+  // omp sessions measure context against omp's own catalog window for the
+  // session's current model, so switching models re-scales the ring.
+  const [ompWindows, setOmpWindows] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!ompEngine) return;
+    let cancelled = false;
+    loadOmpCatalog(false)
+      .then((catalog) => {
+        if (cancelled) return;
+        const next: Record<string, number> = {};
+        for (const model of catalog.models) if (model.contextWindow) next[`${model.provider}/${model.id}`] = model.contextWindow;
+        setOmpWindows(next);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [ompEngine]);
+  const ompModelKey = activeSessionSummary?.providerId && activeSessionSummary?.modelId
+    ? `${activeSessionSummary.providerId}/${activeSessionSummary.modelId}`
+    : undefined;
+  const ompContextUsage = useMemo(() => {
+    if (!ompEngine || !composerContextUsage) return composerContextUsage;
+    const window = (ompModelKey && ompWindows[ompModelKey]) || composerContextUsage.contextWindow;
+    return window ? { ...composerContextUsage, contextWindow: window } : undefined;
+  }, [ompEngine, composerContextUsage, ompModelKey, ompWindows]);
   const modelReady = nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
     : !activeSessionSummary
@@ -616,7 +641,7 @@ export function Composer({
             modelMenu={modelMenu}
             modelLabel={modelLabel}
             thinkingLabel={thinkingLabel}
-            contextUsage={composerContextUsage ?? null}
+            contextUsage={ompContextUsage ?? null}
             value={value}
             modelReady={modelReady}
             sendBlocked={sendBlocked}

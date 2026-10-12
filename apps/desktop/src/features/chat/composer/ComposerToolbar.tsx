@@ -188,7 +188,7 @@ export function ComposerToolbar({
 
       <div className="composer-right">
         <ComposerControlSlots side="right" />
-        {contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
+        {!omp && contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
         {omp ? (
           <>
           <OmpRolePicker
@@ -206,6 +206,8 @@ export function ComposerToolbar({
             onSessionChanged={omp.onSessionChanged}
             showToast={showToast}
           />
+          {/* omp: the context ring sits right of the model picker, before Send. */}
+          {contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
           </>
         ) : <ComposerModelPicker
           t={t}

@@ -31,14 +31,11 @@ test("the sidebar footer is an action bar, not a fabricated identity", () => {
   }
 });
 
-test("footer exposes settings, plugins, scheduled tasks and notifications in one row", () => {
+test("footer exposes settings, scheduled tasks and notifications in one row", () => {
   assert.match(sidebarSource, /className="footer-actions"/);
   assert.match(sidebarSource, /data-nav="settings"/);
-  assert.match(sidebarSource, /data-nav="plugins"/);
-  const pluginsAction = sidebarSource.match(
-    /<TooltipButton[\s\S]*?data-nav="plugins"[\s\S]*?<\/TooltipButton>/,
-  )?.[0] ?? "";
-  assert.match(pluginsAction, /<IconPlug size=\{14\} aria-hidden \/>/);
+  // OMP Desktop: the plugin marketplace entry is removed.
+  assert.doesNotMatch(sidebarSource, /data-nav="plugins"/);
   assert.doesNotMatch(sidebarSource, /data-nav="theme"/);
   assert.match(
     sidebarSource,
@@ -50,7 +47,7 @@ test("footer exposes settings, plugins, scheduled tasks and notifications in one
   const actions = sidebarSource
     .split("<TooltipButton")
     .filter((chunk) => /className=(?:"footer-action"|\{`footer-action )/.test(chunk));
-  assert.equal(actions.length, 3);
+  assert.equal(actions.length, 2);
   for (const action of actions) {
     const attrs = action.slice(0, action.indexOf(">"));
     assert.match(attrs, /tooltip=/);
@@ -69,10 +66,6 @@ test("footer exposes settings, plugins, scheduled tasks and notifications in one
   assert.match(
     footerAttributes('data-nav="settings"'),
     /aria-pressed=\{page === "settings"\}/,
-  );
-  assert.match(
-    footerAttributes('data-nav="plugins"'),
-    /aria-pressed=\{page === "plugins"\}/,
   );
   assert.match(footerAttributes('data-nav="scheduled"'), /aria-pressed=\{page === "scheduled"\}/);
 });

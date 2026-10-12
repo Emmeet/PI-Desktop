@@ -33,11 +33,6 @@ const ScheduledPage = lazy(() =>
     default: module.ScheduledPage,
   })),
 );
-const PluginsPage = lazy(() =>
-  import("../../pages/PluginsPage").then((module) => ({
-    default: module.PluginsPage,
-  })),
-);
 const loadChatSurface = () => import("../../components/ChatSurface");
 const ChatSurface = lazy(() =>
   loadChatSurface().then((module) => ({
@@ -275,10 +270,6 @@ export function AppShell() {
                   {page === "scheduled" ? (
                     <div className="route-surface route-page">
                       <ScheduledPage />
-                    </div>
-                  ) : page === "plugins" ? (
-                    <div className="route-surface route-page">
-                      <PluginsPage />
                     </div>
                   ) : (
                     <ChatSurface visible={page === "chat"} />

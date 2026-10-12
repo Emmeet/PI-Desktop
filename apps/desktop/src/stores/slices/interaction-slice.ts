@@ -61,6 +61,8 @@ export function createInteractionSlice({
 
     setPage: (page, opts) => {
       runtime.beginNavigationIntent();
+      // OMP Desktop: the plugin marketplace page is removed; land on chat.
+      if (page === "plugins") page = "chat";
       const record = opts?.record !== false;
       set((state) => {
         if (!record) return { page };

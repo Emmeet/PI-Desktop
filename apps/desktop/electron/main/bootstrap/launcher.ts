@@ -242,6 +242,8 @@ export function createLauncher({
     // host-core low-level hook owns this exact binding so it still works while
     // another application is focused; do not ask Electron to register it too.
     if (process.platform === "win32" && binding === "Alt+Space") return;
+    // OMP Desktop: plugin launcher disabled.
+    if (process.env.OMP_DESKTOP_ALLOW_PLUGINS !== "1") return;
     if (!accelerator || accelerator === launcherState.pluginLauncherAccelerator) return;
     const registered = globalShortcut.register(accelerator, () => {
       void togglePluginLauncher().catch((error) =>

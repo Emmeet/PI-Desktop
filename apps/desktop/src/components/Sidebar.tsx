@@ -75,7 +75,6 @@ import {
   IconArchive,
   IconArchiveRestore,
   IconArrowUpDown,
-  IconPlug,
   IconBranch,
   IconCheck,
   IconChevronDown,
@@ -2530,19 +2529,7 @@ export function Sidebar({
             >
               <IconSettings size={14} aria-hidden />
             </TooltipButton>
-            <TooltipButton
-              type="button"
-              className={`footer-action ${page === "plugins" ? "active" : ""}`}
-              data-nav="plugins"
-              tooltip={t("nav.plugins")}
-              ariaLabel={t("nav.plugins")}
-              onClick={() => page === "plugins"
-                ? (canNavBack() ? navBack() : setPage("chat"))
-                : setPage("plugins")}
-              aria-pressed={page === "plugins"}
-            >
-              <IconPlug size={14} aria-hidden />
-            </TooltipButton>
+            {/* OMP Desktop: plugin marketplace entry removed. */}
             <TooltipButton
               type="button"
               className={`footer-action ${page === "scheduled" ? "active" : ""}`}

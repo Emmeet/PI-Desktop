@@ -133,9 +133,9 @@ export function ContextUsageInspector({
     0,
   );
   const level =
-    context.remainingPercent <= 10
+    context.remainingPercent <= 5
       ? "critical"
-      : context.remainingPercent <= 25
+      : context.remainingPercent <= 20
         ? "warning"
         : "comfortable";
   // One accessible sentence serves both display modes: the localized `state`

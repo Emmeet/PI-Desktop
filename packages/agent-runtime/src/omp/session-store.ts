@@ -40,6 +40,31 @@ export function splitModel(value: unknown): { providerId?: string; modelId?: str
 }
 
 /** Project one omp `message` payload to the app's UiMessage shape. */
+/** omp's per-request usage (input/output/cacheRead/cacheWrite/totalTokens/cost) as the app's MessageUsage. */
+export function ompUsage(raw: any, message?: any): UiMessage["usage"] | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  const input = num(raw.input);
+  const output = num(raw.output);
+  const cacheRead = num(raw.cacheRead);
+  const cacheWrite = num(raw.cacheWrite);
+  const total = num(raw.totalTokens) || input + output + cacheRead + cacheWrite;
+  if (!total) return undefined;
+  const cost = raw.cost && typeof raw.cost === "object"
+    ? { input: num(raw.cost.input), output: num(raw.cost.output), cacheRead: num(raw.cost.cacheRead), cacheWrite: num(raw.cost.cacheWrite), total: num(raw.cost.total) }
+    : undefined;
+  return {
+    inputTokens: input,
+    outputTokens: output,
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: cacheWrite,
+    totalTokens: total,
+    ...(cost ? { cost, costStatus: "reported" as const } : {}),
+    ...(typeof message?.provider === "string" ? { providerId: message.provider } : {}),
+    ...(typeof message?.model === "string" ? { modelId: message.model } : {}),
+  };
+}
+
 export function projectMessage(
   id: string,
   createdAt: string,
@@ -67,6 +92,7 @@ export function projectMessage(
       status: message.stopReason === "error" ? "error" : message.stopReason === "aborted" ? "aborted" : "complete",
       ...(typeof message.model === "string" ? { modelId: message.model } : {}),
       ...(typeof message.provider === "string" ? { providerId: message.provider } : {}),
+      ...(ompUsage(message.usage, message) ? { usage: ompUsage(message.usage, message) } : {}),
     };
   }
   if (message.role === "toolResult") {
