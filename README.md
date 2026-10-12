@@ -805,7 +805,6 @@ Or use the launcher, which builds anything missing and starts the app:
 
 ```bash
 scripts/run-omp-desktop.sh                       # add OMP_DESKTOP_NO_SANDBOX=1 in containers/VMs
-PI_DESKTOP_OMP_MODEL=provider/model scripts/run-omp-desktop.sh
 ```
 
 ### How it works
@@ -816,6 +815,23 @@ PI_DESKTOP_OMP_MODEL=provider/model scripts/run-omp-desktop.sh
   with an `OMP` badge. Opening one and sending a message resumes it with
   `omp --resume <file>`.
 - **Stop** sends omp's `abort` command.
+- **Model picker** (composer, bottom right) lists the models omp reports
+  through `get_available_models`, which come from your `models.yml` and logins.
+  Choosing one calls omp's `set_model` on the open chat and is used for new chats.
+  The reasoning slider calls `set_thinking_level`. The last choice is saved in
+  `~/.config/omp-desktop/preferences.json` and survives restarts.
+- **Role switcher** (`@role`, next to the model picker) applies an omp model
+  role's model to the chat. **Settings → Models** manages omp roles: assign the
+  built-in roles (`default`, `smol`, `slow`, `plan`, `commit`, …), or create and
+  delete custom ones. Roles are stored by omp itself (`modelRoles` in
+  `~/.omp/agent/config.yml`), written through `omp config set`.
+- **Attachments**: images are sent to omp as images. Other files are passed by
+  their path, so omp can read them.
+- **Edit and Regenerate** use omp's `branch`. omp writes the rewound
+  conversation to a new session file, and the app hides the old file.
+- **Fork** uses omp's `fork`. **Rename** uses `set_session_name`. **Delete**
+  asks for confirmation, then removes the session's `.jsonl` file (only inside
+  omp's sessions folder) and its artifacts folder.
 - Models, logins, tools, extensions, and compaction all come from omp itself.
 
 ### Environment variables
@@ -824,7 +840,8 @@ PI_DESKTOP_OMP_MODEL=provider/model scripts/run-omp-desktop.sh
 | --- | --- |
 | `PI_DESKTOP_OMP_BIN` | Full path to the `omp` executable. Without it the app searches `PATH`, `~/.bun/bin`, `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin`. |
 | `PI_DESKTOP_OMP_AGENT_DIR` | Use a different omp agent directory (default `~/.omp/agent`, or `PI_CODING_AGENT_DIR`). |
-| `PI_DESKTOP_OMP_MODEL` | `provider/model` to pass as `--model` when a new session starts. |
+| `PI_DESKTOP_OMP_MODEL` | Optional default `provider/model` for new chats. It is used only until you pick a model in the app. |
+| `PI_DESKTOP_OMP_PREFS` | Path to the app's preferences file (default `~/.config/omp-desktop/preferences.json`). |
 | `PI_DESKTOP_LEGACY_PI_ENGINE=1` | Restore the original embedded-pi behavior (unsupported in this fork). |
 
 If `omp` can't be found, sending a message fails with an `OMP_NOT_FOUND`
@@ -832,13 +849,13 @@ error that includes these install instructions.
 
 ### Current limitations
 
-- Text prompts only: no image or file attachments, message editing, or
-  regenerating from the desktop UI.
-- Forking, renaming, and deleting omp sessions from the app are not supported
-  yet. omp's own `/fork` and similar commands work inside the chat.
-- The app's model picker, permission modes, plan mode, subagent panel, and
-  desktop plugins/MCP servers do not control omp. omp uses its own settings,
-  and its tools run without desktop approval prompts.
+- Permission modes, plan mode, the subagent panel, voice, and desktop
+  plugins/MCP servers do not control omp, so they are hidden or have no effect.
+  omp's tools run without desktop approval prompts.
+- After a reload, images in older messages show as file chips rather than
+  inline previews.
+- Edit and Regenerate leave the earlier session file on disk. The app hides it
+  through its preferences file; omp still has it.
 - The Rust host service still starts for settings and projects, and the
   embedded pi packages are still in the dependency tree, but they are not used
   to run agents.

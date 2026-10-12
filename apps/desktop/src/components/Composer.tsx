@@ -103,6 +103,7 @@ export function Composer({
     (session) => session.id === activeSessionId,
   );
   const nativeSession = activeSessionSummary?.source === "pi-native";
+  const refreshSessionsForOmp = useAppStore((s) => s.refreshSessions);
   const nativeReadOnly =
     nativeSession && activeSessionSummary.capabilities?.canPrompt !== true;
   const nativeInputBlocked = nativeReadOnly || (nativeSession && isRunning);
@@ -204,7 +205,8 @@ export function Composer({
     settings?.largePasteThreshold,
   );
   const attachments = useComposerAttachments({
-    inputBlocked: approvalPending || nativeSession,
+    // omp sessions accept image and file attachments.
+    inputBlocked: approvalPending || nativeReadOnly,
     activeSessionId,
     draftKey,
     largePasteThreshold,
@@ -235,7 +237,7 @@ export function Composer({
   const executionActive = isActivePlanExecution(planCheckpoint);
   const runActive = isRunning || executionActive;
   const inputBlocked = approvalPending || pasting || nativeInputBlocked;
-  const controlsBlocked = approvalPending || nativeSession;
+  const controlsBlocked = approvalPending || nativeReadOnly;
   const sendBlocked = approvalPending || pasting || nativeInputBlocked;
   // Edit returns one queued row to the composer. The row is removed and its
   // captured draft becomes the input, so the input must be empty first: the
@@ -396,6 +398,8 @@ export function Composer({
   });
   // omp is the agent engine: a new chat (no session yet) becomes an omp
   // session, and omp chooses the model from its own config.
+  // omp sessions (and new chats, which become omp sessions) use omp's catalog.
+  const ompEngine = nativeSession || !activeSessionSummary;
   const modelReady = nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
     : !activeSessionSummary
@@ -595,6 +599,7 @@ export function Composer({
           />
           <ComposerToolbar
             t={t}
+            omp={ompEngine ? { session: activeSessionSummary, onSessionChanged: () => void refreshSessionsForOmp() } : undefined}
             mode={mode}
             planningLive={planningLive}
             providerId={provider?.id}

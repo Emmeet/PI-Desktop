@@ -1,5 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { TFunction } from "i18next";
+import type { SessionSummary } from "@pi-desktop/shared";
+import { OmpModelPicker } from "./OmpModelPicker";
 import {
   keybindingDisplayParts,
   type Mode,
@@ -23,6 +25,7 @@ import {
 import { ModeIcon } from "./ComposerModeIcon";
 import { LiveVoiceControls } from "../../voice/live/LiveVoiceControls";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { OmpRolePicker } from "./OmpRolePicker";
 import {
   MODE_LABEL_KEYS,
   nextMode,
@@ -34,6 +37,8 @@ type ContextUsage = Parameters<typeof ContextUsageInspector>[0];
 
 export type ComposerToolbarProps = {
   t: TFunction;
+  /** omp engine: use omp's model catalog and hide controls omp ignores. */
+  omp?: { session: SessionSummary | null | undefined; onSessionChanged: () => void };
   mode: Mode;
   planningLive: boolean;
   providerId?: string;
@@ -101,6 +106,7 @@ export function ComposerToolbar({
   submit,
   workSessionId,
   workSessionLabel,
+  omp,
 }: ComposerToolbarProps) {
   const platform = (window.piDesktop?.platform ?? "darwin") as ShortcutPlatform;
   const steeringShortcut = keybindingDisplayParts("Alt+Enter", platform).join("+");
@@ -122,7 +128,8 @@ export function ComposerToolbar({
             <IconPlus size={15} aria-hidden="true" />
           </TooltipButton>
         </div>
-        <LiveVoiceControls t={t} workSessionId={workSessionId} />
+        {omp ? null : <LiveVoiceControls t={t} workSessionId={workSessionId} />}
+        {omp ? null : <>
         <TooltipButton
           type="button"
           className="icon-btn mode-chip composer-mode-chip"
@@ -175,13 +182,32 @@ export function ComposerToolbar({
                   });
                 }
           }} />
+        </>}
         <ComposerControlSlots side="left" />
       </div>
 
       <div className="composer-right">
         <ComposerControlSlots side="right" />
         {contextUsage ? <ContextUsageInspector {...contextUsage} /> : null}
-        <ComposerModelPicker
+        {omp ? (
+          <>
+          <OmpRolePicker
+            session={omp.session}
+            controlsBlocked={controlsBlocked}
+            onCloseOtherMenus={() => setPermissionOpen(false)}
+            onSessionChanged={omp.onSessionChanged}
+            showToast={showToast}
+          />
+          <OmpModelPicker
+            t={t}
+            session={omp.session}
+            controlsBlocked={controlsBlocked}
+            onCloseOtherMenus={() => setPermissionOpen(false)}
+            onSessionChanged={omp.onSessionChanged}
+            showToast={showToast}
+          />
+          </>
+        ) : <ComposerModelPicker
           t={t}
           controller={modelMenu}
           modelLabel={modelLabel}
@@ -191,7 +217,7 @@ export function ComposerToolbar({
           selectedModelId={modelId}
           controlsBlocked={controlsBlocked}
           onCloseOtherMenus={() => setPermissionOpen(false)}
-        />
+        />}
         {composerTransforms.map((transform) => {
           const key = `${transform.pluginId}/${transform.id}`;
           const isActive = activeTransformKey === key;

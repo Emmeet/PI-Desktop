@@ -1316,7 +1316,7 @@ export function Sidebar({
     if (ids.length === 0) return;
     closeMenus();
     const toDelete = sessions.filter(
-      (s) => ids.includes(s.id) && s.source !== "pi-native",
+      (s) => ids.includes(s.id) && (s.source !== "pi-native" || s.nativeHarness === "omp"),
     );
     for (const session of toDelete) {
       try {
@@ -2142,7 +2142,7 @@ export function Sidebar({
             </>
           ) : (
           <>
-            {session.source !== "pi-native" ? (
+            {session.source !== "pi-native" || session.nativeHarness === "omp" ? (
               <button
                 ref={menuFirstItemRef}
                 type="button"
@@ -2183,7 +2183,7 @@ export function Sidebar({
                 ? t("nav.restoreTask", { defaultValue: "Restore" })
                 : t("nav.archiveTask", { defaultValue: "Archive" })}
             </button>
-            {session.source !== "pi-native" ? (
+            {session.source !== "pi-native" || session.nativeHarness === "omp" ? (
               <button
                 type="button"
                 role="menuitem"
@@ -2226,7 +2226,7 @@ export function Sidebar({
                 </button>
               </>
             ) : null}
-            {session.source !== "pi-native" ? (
+            {session.source !== "pi-native" || session.nativeHarness === "omp" ? (
               <button
                 type="button"
                 role="menuitem"
@@ -2557,7 +2557,8 @@ export function Sidebar({
             <NotificationCenter onBeforeOpen={() => closeMenus(false)} />
           </div>
 
-          <TooltipButton
+          {/* Version lives in Settings → Info; the footer only surfaces a ready update. */}
+          {updateReady ? <TooltipButton
             type="button"
             className={`footer-build ${updateReady ? "has-update" : ""}`}
             data-nav="build"
@@ -2578,7 +2579,7 @@ export function Sidebar({
           >
             <span className="footer-build-version">{buildLabel}</span>
             {updateReady ? <span className="footer-build-dot" aria-hidden /> : null}
-          </TooltipButton>
+          </TooltipButton> : null}
         </div>
       </div>
       {renderFloatingMenu()}

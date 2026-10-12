@@ -555,9 +555,9 @@ export function registerWorkspaceIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      const session = (await host.call("session.get", { id: sessionId })) as {
-        session?: unknown;
-      };
+      const session = sessionId.startsWith("native-pi:")
+        ? { session: true }
+        : ((await host.call("session.get", { id: sessionId })) as { session?: unknown });
       if (!session.session) {
         throw Object.assign(new Error("session not found"), {
           errorCode: ErrorCodes.NOT_FOUND,
@@ -567,7 +567,7 @@ export function registerWorkspaceIpc({
       return {
         files: await importComposerFiles(
           dataDir,
-          sessionId,
+          attachmentDirId(sessionId),
           paths,
         ),
       };
@@ -600,9 +600,9 @@ export function registerWorkspaceIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      const session = (await host.call("session.get", { id: sessionId })) as {
-        session?: unknown;
-      };
+      const session = sessionId.startsWith("native-pi:")
+        ? { session: true }
+        : ((await host.call("session.get", { id: sessionId })) as { session?: unknown });
       if (!session.session) {
         throw Object.assign(new Error("session not found"), {
           errorCode: ErrorCodes.NOT_FOUND,
@@ -614,7 +614,7 @@ export function registerWorkspaceIpc({
         });
       }
       const files = input.files as ComposerPasteFile[];
-      const saved = await saveComposerPasteFiles(dataDir, sessionId, files);
+      const saved = await saveComposerPasteFiles(dataDir, attachmentDirId(sessionId), files);
       recordPastedClipboardFiles(files);
       return { files: saved };
     },
@@ -935,4 +935,11 @@ export function registerWorkspaceIpc({
     },
   );
 
+}
+
+/** omp sessions ("native-pi:<id>") keep pasted/imported files under a filesystem-safe id. */
+function attachmentDirId(sessionId: string): string {
+  return sessionId.startsWith("native-pi:")
+    ? `omp-${sessionId.slice("native-pi:".length).replace(/[^A-Za-z0-9_-]/g, "_")}`
+    : sessionId;
 }

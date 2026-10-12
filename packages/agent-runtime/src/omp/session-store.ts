@@ -12,6 +12,7 @@ export type OmpSessionFile = {
   title?: string;
   providerId?: string;
   modelId?: string;
+  thinkingLevel?: string;
   messages: UiMessage[];
 };
 
@@ -122,7 +123,9 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
   const toolArgs = new Map<string, unknown>();
   const messages: UiMessage[] = [];
   let model: { providerId?: string; modelId?: string } = {};
+  let thinkingLevel: string | undefined;
   for (const entry of branch) {
+    if (entry.type === "thinking_level_change" && typeof entry.thinkingLevel === "string") thinkingLevel = entry.thinkingLevel;
     const ts = typeof entry.timestamp === "string" ? entry.timestamp : header.timestamp;
     if (entry.type === "model_change") model = splitModel(entry.model ?? (entry.provider && entry.modelId ? `${entry.provider}/${entry.modelId}` : undefined));
     else if (entry.type === "message") {
@@ -145,6 +148,7 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
     updatedAt: branch.at(-1)?.timestamp ?? createdAt,
     title: title ?? (firstUser ? firstUser.content.slice(0, 80) : undefined),
     ...model,
+    ...(thinkingLevel ? { thinkingLevel } : {}),
     messages,
   };
 }

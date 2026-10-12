@@ -550,6 +550,8 @@ function normalizePlansChangedEvent(value: unknown): PlanningStateEvent {
   };
 }
 
+export type OmpRole = { id: string; name: string; builtin: boolean; model: string | null };
+
 export const api = {
   getVersion: () => invoke<AppVersionInfo>(IPC.invoke.appGetVersion),
   health: () => invoke<HostHealth>(IPC.invoke.appHealth),
@@ -588,6 +590,22 @@ export const api = {
       ...result,
       sessions: result.sessions.map(normalizeSession),
     })),
+  ompListModels: (refresh = false) =>
+    invoke<{
+      models: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow?: number; input?: string[] }>;
+      defaultModel: { provider: string; modelId: string } | null;
+      selected: { provider: string; modelId: string } | null;
+      thinkingLevel: string | null;
+      thinkingLevels: string[];
+    }>(IPC.invoke.ompModelsList, { refresh }),
+  ompSetModel: (input: { sessionId?: string; provider: string; modelId: string }) =>
+    invoke<{ session: SessionSummary | null }>(IPC.invoke.ompModelSet, input),
+  ompListRoles: () =>
+    invoke<{ roles: OmpRole[] }>(IPC.invoke.ompRolesList, {}),
+  ompSetRole: (input: { role: string; model: string | null }) =>
+    invoke<{ roles: OmpRole[] }>(IPC.invoke.ompRoleSet, input),
+  ompSetThinking: (input: { sessionId?: string; level: string }) =>
+    invoke<{ session: SessionSummary | null }>(IPC.invoke.ompThinkingSet, input),
   createSession: (input?: Partial<SessionSummary>) =>
     invoke<{ session: SessionSummary }>(IPC.invoke.sessionCreate, input ?? {}).then(
       (result) => ({ ...result, session: normalizeSession(result.session) }),

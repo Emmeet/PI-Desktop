@@ -107,7 +107,7 @@ test("paste IPC is a typed renderer-to-main bridge", () => {
   assert.match(api, /IPC\.invoke\.clipboardRecordPaste/);
   assert.match(api, /IPC\.invoke\.composerImportFiles/);
   assert.match(main, /host\.call\("session\.get", \{ id: sessionId \}\)/);
-  assert.match(main, /saveComposerPasteFiles\(dataDir, sessionId, files\)/);
+  assert.match(main, /saveComposerPasteFiles\(dataDir, attachmentDirId\(sessionId\), files\)/);
   assert.match(main, /recordPastedClipboardFiles\(files\)/);
   assert.match(main, /assertMainWindowSender\(event\)/);
   assert.match(main, /imageDimensions\(bytes\)/);
@@ -115,7 +115,7 @@ test("paste IPC is a typed renderer-to-main bridge", () => {
   assert.match(main, /clipboardHistory\.recordText\(input\.text\)/);
   assert.match(main, /rememberComposerPickerSelection\(result\.filePaths, event\.sender\.id\)/);
   assert.match(main, /consumeComposerPickerSelection\(input\.token, event\.sender\.id\)/);
-  assert.match(main, /importComposerFiles\(\s*dataDir,\s*sessionId,\s*paths/);
+  assert.match(main, /importComposerFiles\(\s*dataDir,\s*attachmentDirId\(sessionId\),\s*paths/);
   assert.doesNotMatch(main, /input\.paths/);
   assert.doesNotMatch(api, /importFiles: \(sessionId: string, paths: string\[\]\)/);
 });

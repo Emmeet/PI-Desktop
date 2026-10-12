@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import type {
   AgentEvent,
   AgentEventEnvelope,
@@ -12,8 +12,46 @@ import type {
 } from "@pi-desktop/shared";
 import { NATIVE_PI_SESSION_PREFIX } from "../native-pi-session-id.js";
 import { resolveOmpBinary } from "./binary.js";
+import {
+  envModelOverride,
+  readOmpPreferences,
+  writeOmpPreferences,
+  type OmpModelRef,
+  type OmpPreferences,
+} from "./preferences.js";
 import { OmpRpcProcess, type OmpFrame } from "./rpc-process.js";
 import { listOmpSessionFiles, parseOmpSession, projectMessage, textOf, type OmpSessionFile } from "./session-store.js";
+
+export type OmpPromptAttachment = { path: string; name?: string; kind: "image" | "file"; mimeType?: string };
+
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const IMAGE_MIME: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+};
+
+/** Images become omp `images`; other files become path references omp's tools can read. */
+export function prepareOmpPrompt(content: string, attachments: OmpPromptAttachment[] = []): {
+  message: string;
+  images: Array<{ type: "image"; data: string; mimeType: string }>;
+} {
+  const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+  const files: string[] = [];
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment.path !== "string" || !isAbsolute(attachment.path)) continue;
+    const mimeType = attachment.mimeType || IMAGE_MIME[extname(attachment.path).toLowerCase()];
+    if (attachment.kind === "image" && mimeType?.startsWith("image/")) {
+      const size = statSync(attachment.path).size;
+      if (size > MAX_IMAGE_BYTES) throw Object.assign(new Error(`Image is too large (max 20 MB): ${attachment.path}`), { errorCode: "INVALID_ARGUMENT" });
+      images.push({ type: "image", data: readFileSync(attachment.path).toString("base64"), mimeType });
+    } else if (!content.includes(attachment.path)) {
+      files.push(attachment.path);
+    }
+  }
+  const message = files.length
+    ? `${content}${content ? "\n\n" : ""}Attached files (read them with your tools):\n${files.map((path) => `- ${path}`).join("\n")}`
+    : content;
+  return { message, images };
+}
 
 export type OmpNotifier = (envelope: AgentEventEnvelope) => void;
 
@@ -33,7 +71,23 @@ type SessionRecord = {
   path?: string;
   createdAt: string;
   title?: string;
+  /** Model / thinking explicitly chosen in the app for this session. */
+  model?: OmpModelRef;
+  thinkingLevel?: string;
 };
+
+type HiddenPrefs = { hiddenFiles?: string[] };
+
+export type OmpModelInfo = {
+  provider: string;
+  id: string;
+  name: string;
+  reasoning: boolean;
+  contextWindow?: number;
+  input?: string[];
+};
+
+export const OMP_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 
 function stableId(path: string): string {
   return `${NATIVE_PI_SESSION_PREFIX}${createHash("sha256").update(path).digest("base64url").slice(0, 24)}`;
@@ -57,6 +111,8 @@ class OmpSessionRuntime {
   private turnId?: string;
   private promptRequestId?: string;
   private userMessageId?: string;
+  private lastPromptUserId?: string;
+  onTurnSettled?: (optimisticUserId: string | undefined) => void;
   private currentAssistant?: UiMessage;
   private readonly toolArgs = new Map<string, unknown>();
   sessionFile?: string;
@@ -82,6 +138,8 @@ class OmpSessionRuntime {
     id: string;
     cwd: string;
     sessionPath?: string;
+    model?: OmpModelRef;
+    thinkingLevel?: string;
     agentDir: string;
     notify: OmpNotifier;
     onSessionFile: (path: string) => void;
@@ -90,8 +148,8 @@ class OmpSessionRuntime {
     const binary = resolveOmpBinary();
     const args = ["--cwd", input.cwd];
     if (input.sessionPath) args.push("--resume", input.sessionPath);
-    const model = process.env.PI_DESKTOP_OMP_MODEL?.trim();
-    if (model && !input.sessionPath) args.push("--model", model);
+    if (input.model) args.push("--model", `${input.model.provider}/${input.model.modelId}`);
+    if (input.thinkingLevel) args.push("--thinking", input.thinkingLevel);
     const env = { ...process.env };
     // Keep the child on the same agent dir the app lists sessions from.
     if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = input.agentDir;
@@ -132,18 +190,38 @@ class OmpSessionRuntime {
     }
   }
 
+  request<T = any>(command: Record<string, unknown> & { type: string }, timeoutMs?: number): Promise<T> {
+    return this.rpc.request<T>(command, timeoutMs);
+  }
+
+  /** Rewind the conversation to just before a user message (omp writes a new branch file). */
+  async branchBefore(entryId: string): Promise<void> {
+    const result = await this.rpc.request<{ cancelled?: boolean }>({ type: "branch", entryId });
+    if (result?.cancelled) throw Object.assign(new Error("omp cancelled the branch"), { errorCode: "OMP_BRANCH_CANCELLED" });
+    await this.refreshSessionFile();
+  }
+
+  async setModel(model: OmpModelRef): Promise<void> {
+    await this.rpc.request({ type: "set_model", provider: model.provider, modelId: model.modelId });
+  }
+
+  async setThinkingLevel(level: string): Promise<void> {
+    await this.rpc.request({ type: "set_thinking_level", level });
+  }
+
   setNotifier(notify: OmpNotifier): void {
     this.notify = notify;
   }
 
-  async prompt(content: string, turnId: string, userMessageId?: string): Promise<void> {
+  async prompt(content: string, turnId: string, userMessageId?: string, images: unknown[] = []): Promise<void> {
     if (this.isRunning) throw Object.assign(new Error("session already has an active turn"), { errorCode: "AGENT_BUSY" });
     this.turnId = turnId;
     this.userMessageId = userMessageId;
+    this.lastPromptUserId = userMessageId;
     this.promptRequestId = this.rpc.nextId("prompt");
     this.emit({ type: "agent_start" });
     try {
-      const data = await this.rpc.request<{ agentInvoked?: boolean }>({ id: this.promptRequestId, type: "prompt", message: content });
+      const data = await this.rpc.request<{ agentInvoked?: boolean }>({ id: this.promptRequestId, type: "prompt", message: content, ...(images.length ? { images } : {}) });
       // A local slash command finished without an agent turn; no prompt_result follows.
       if (data && data.agentInvoked === false) this.finish();
     } catch (error) {
@@ -192,8 +270,11 @@ class OmpSessionRuntime {
             },
           });
         }
-        void this.refreshSessionFile().catch(() => undefined);
+        const optimistic = this.lastPromptUserId;
         this.finish();
+        void this.refreshSessionFile()
+          .catch(() => undefined)
+          .finally(() => this.onTurnSettled?.(optimistic));
         return;
       }
       case "response": {
@@ -288,6 +369,204 @@ export class OmpSessionService {
     this.root = resolve(options.sessionRoot ?? join(this.agentDir, "sessions"));
   }
 
+  private prefsCache?: OmpPreferences;
+  private catalog?: { at: number; promise: Promise<{ models: OmpModelInfo[]; defaultModel: OmpModelRef | null }> };
+
+  private prefs(): OmpPreferences {
+    this.prefsCache ??= readOmpPreferences();
+    return this.prefsCache;
+  }
+
+  private savePrefs(update: Partial<OmpPreferences>): void {
+    this.prefsCache = { ...this.prefs(), ...update };
+    try { writeOmpPreferences(this.prefsCache); } catch { /* preference is best effort */ }
+  }
+
+  /** Model a brand-new chat starts with: remembered choice, then env, then omp's default. */
+  newSessionModel(): OmpModelRef | undefined {
+    return this.prefs().model ?? envModelOverride();
+  }
+
+  private modelFields(record: SessionRecord, file: OmpSessionFile | undefined): { providerId?: string; modelId?: string } {
+    if (record.model) return { providerId: record.model.provider, modelId: record.model.modelId };
+    if (file?.modelId) return { ...(file.providerId ? { providerId: file.providerId } : {}), modelId: file.modelId };
+    if (!file) {
+      const next = this.newSessionModel();
+      if (next) return { providerId: next.provider, modelId: next.modelId };
+      const fallback = this.catalogDefault;
+      if (fallback) return { providerId: fallback.provider, modelId: fallback.modelId };
+    }
+    return {};
+  }
+
+  private catalogDefault?: OmpModelRef;
+  /** Renderer optimistic user-message id -> omp entry id, for edit / regenerate. */
+  private readonly aliases = new Map<string, string>();
+
+  private hiddenFiles(): Set<string> {
+    return new Set((this.prefs() as HiddenPrefs).hiddenFiles ?? []);
+  }
+
+  private hideFile(path: string): void {
+    const hidden = this.hiddenFiles();
+    hidden.add(path);
+    this.savePrefs({ hiddenFiles: [...hidden] } as Partial<OmpPreferences>);
+  }
+
+  /** Short-lived omp process bound to a session file, for one-off session commands. */
+  private async withSessionProcess<T>(record: SessionRecord, fn: (rpc: OmpRpcProcess) => Promise<T>): Promise<T> {
+    if (!record.path || !existsSync(record.path)) {
+      throw Object.assign(new Error("This session has no saved conversation yet"), { errorCode: "INVALID_ARGUMENT" });
+    }
+    const env = { ...process.env };
+    if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = this.agentDir;
+    const rpc = new OmpRpcProcess(resolveOmpBinary(), ["--cwd", record.cwd, "--resume", record.path], {
+      cwd: existsSync(record.cwd) ? record.cwd : homedir(),
+      env,
+    });
+    try {
+      await Promise.race([
+        rpc.ready,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
+      ]);
+      return await fn(rpc);
+    } finally {
+      rpc.dispose();
+    }
+  }
+
+  private resolveEntryId(record: SessionRecord, messageId: string): string {
+    const aliased = this.aliases.get(messageId);
+    if (aliased) return aliased;
+    const file = this.readFile(record);
+    if (file?.messages.some((message) => message.id === messageId)) return messageId;
+    throw Object.assign(new Error("That message is not saved in the omp session yet; reopen the chat and try again"), {
+      errorCode: "NOT_FOUND",
+    });
+  }
+
+  async rename(id: string, title: string): Promise<SessionSummary> {
+    const name = title.trim();
+    if (!name) throw Object.assign(new Error("Session name cannot be empty"), { errorCode: "INVALID_ARGUMENT" });
+    const record = this.record(id);
+    record.title = name;
+    const runtime = this.runtimes.get(id);
+    if (runtime?.alive) await runtime.request({ type: "set_session_name", name });
+    else if (record.path && existsSync(record.path)) {
+      await this.withSessionProcess(record, (rpc) => rpc.request({ type: "set_session_name", name }));
+    }
+    return this.summary(record, this.readFile(record));
+  }
+
+  /** Delete the session file (and omp's per-session artifact folder). The UI confirms first. */
+  async delete(id: string): Promise<void> {
+    const record = this.record(id);
+    if (this.runtimes.get(id)?.isRunning) {
+      throw Object.assign(new Error("Stop the running turn before deleting this session"), { errorCode: "AGENT_BUSY" });
+    }
+    this.dispose(id);
+    if (record.path) {
+      let root: string;
+      try { root = realpathSync(this.root); } catch { root = this.root; }
+      if (!inside(root, record.path) || !record.path.endsWith(".jsonl")) {
+        throw Object.assign(new Error("Refusing to delete a file outside omp's session folder"), { errorCode: "PERMISSION_DENIED" });
+      }
+      if (existsSync(record.path)) unlinkSync(record.path);
+      const artifacts = record.path.slice(0, -".jsonl".length);
+      if (inside(root, artifacts) && artifacts !== root && existsSync(artifacts) && statSync(artifacts).isDirectory()) {
+        rmSync(artifacts, { recursive: true, force: true });
+      }
+      this.pathIds.delete(record.path);
+    }
+    this.records.delete(id);
+  }
+
+  /**
+   * omp's own model catalog (models.yml + logins), fetched through a
+   * short-lived `omp --mode rpc --no-session` process. Only display fields
+   * are returned; nothing secret leaves omp.
+   */
+  async listModels(options: { refresh?: boolean } = {}): Promise<{
+    models: OmpModelInfo[];
+    defaultModel: OmpModelRef | null;
+    selected: OmpModelRef | null;
+    thinkingLevel: string | null;
+    thinkingLevels: readonly string[];
+  }> {
+    const fresh = this.catalog && Date.now() - this.catalog.at < 5 * 60_000 && !options.refresh;
+    if (!fresh) {
+      const promise = this.fetchCatalog();
+      this.catalog = { at: Date.now(), promise };
+      promise.catch(() => { if (this.catalog?.promise === promise) this.catalog = undefined; });
+    }
+    const { models, defaultModel } = await this.catalog!.promise;
+    return {
+      models,
+      defaultModel,
+      selected: this.newSessionModel() ?? defaultModel,
+      thinkingLevel: this.prefs().thinkingLevel ?? null,
+      thinkingLevels: OMP_THINKING_LEVELS,
+    };
+  }
+
+  private async fetchCatalog(): Promise<{ models: OmpModelInfo[]; defaultModel: OmpModelRef | null }> {
+    const binary = resolveOmpBinary();
+    const env = { ...process.env };
+    if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = this.agentDir;
+    const rpc = new OmpRpcProcess(binary, ["--no-session"], { cwd: homedir(), env });
+    try {
+      await Promise.race([
+        rpc.ready,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
+      ]);
+      const listed = await rpc.request<{ models?: any[] }>({ type: "get_available_models" }, 60_000);
+      const state = await rpc.request<{ model?: any }>({ type: "get_state" }).catch(() => undefined);
+      const models: OmpModelInfo[] = (listed?.models ?? [])
+        .filter((model) => model && typeof model.provider === "string" && typeof model.id === "string")
+        .map((model) => ({
+          provider: model.provider,
+          id: model.id,
+          name: typeof model.name === "string" && model.name ? model.name : model.id,
+          reasoning: model.reasoning === true,
+          ...(typeof model.contextWindow === "number" ? { contextWindow: model.contextWindow } : {}),
+          ...(Array.isArray(model.input) ? { input: model.input.filter((value: unknown) => typeof value === "string") } : {}),
+        }));
+      const current = state?.model;
+      const defaultModel = current && typeof current.provider === "string" && typeof current.id === "string"
+        ? { provider: current.provider, modelId: current.id }
+        : null;
+      this.catalogDefault = defaultModel ?? undefined;
+      return { models, defaultModel };
+    } finally {
+      rpc.dispose();
+    }
+  }
+
+  /** Choose the model for a session (or, without one, for new chats); remembered across restarts. */
+  async setModel(input: { sessionId?: string; provider: string; modelId: string }): Promise<SessionSummary | null> {
+    const model = { provider: input.provider, modelId: input.modelId };
+    this.savePrefs({ model });
+    if (!input.sessionId) return null;
+    const record = this.record(input.sessionId);
+    const runtime = this.runtimes.get(record.id);
+    if (runtime?.alive) await runtime.setModel(model);
+    record.model = model;
+    return this.summary(record, this.readFile(record));
+  }
+
+  async setThinkingLevel(input: { sessionId?: string; level: string }): Promise<SessionSummary | null> {
+    if (!(OMP_THINKING_LEVELS as readonly string[]).includes(input.level)) {
+      throw Object.assign(new Error(`Unsupported thinking level: ${input.level}`), { errorCode: "INVALID_ARGUMENT" });
+    }
+    this.savePrefs({ thinkingLevel: input.level });
+    if (!input.sessionId) return null;
+    const record = this.record(input.sessionId);
+    const runtime = this.runtimes.get(record.id);
+    if (runtime?.alive) await runtime.setThinkingLevel(input.level);
+    record.thinkingLevel = input.level;
+    return this.summary(record, this.readFile(record));
+  }
+
   has(id: string): boolean {
     return this.records.has(id);
   }
@@ -314,10 +593,9 @@ export class OmpSessionService {
       title: file?.title ?? record.title ?? "New omp session",
       messageCount: file?.messages.length ?? 0,
       ...(record.cwd && existsSync(record.cwd) ? { projectPath: record.cwd } : {}),
-      ...(file?.providerId ? { providerId: file.providerId } : {}),
-      ...(file?.modelId ? { modelId: file.modelId } : {}),
+      ...this.modelFields(record, file),
       mode: "agent",
-      thinkingLevel: "off",
+      thinkingLevel: (record.thinkingLevel ?? file?.thinkingLevel ?? (file ? undefined : this.prefs().thinkingLevel) ?? "off") as SessionSummary["thinkingLevel"],
       permissionMode: "inherit",
       source: "pi-native",
       nativeHarness: "omp",
@@ -337,16 +615,25 @@ export class OmpSessionService {
     const seenPaths = new Set<string>();
     let root: string | undefined;
     try { root = realpathSync(this.root); } catch { root = undefined; }
+    const hidden = this.hiddenFiles();
     if (root) {
       for (const candidate of listOmpSessionFiles(root)) {
         try {
           const path = realpathSync(candidate);
-          if (!inside(root, path)) continue;
+          if (!inside(root, path) || hidden.has(path)) continue;
           const file = parseOmpSession(path);
           if (!file || file.messages.length === 0) continue;
           const id = this.idForPath(path);
           const existing = this.records.get(id);
-          const record: SessionRecord = { id, cwd: file.cwd, path, createdAt: file.createdAt, title: existing?.title };
+          const record: SessionRecord = {
+            id,
+            cwd: file.cwd,
+            path,
+            createdAt: file.createdAt,
+            title: existing?.title,
+            model: existing?.model,
+            thinkingLevel: existing?.thinkingLevel,
+          };
           this.records.set(id, record);
           seenPaths.add(path);
           summaries.push(this.summary(record, file));
@@ -431,10 +718,31 @@ export class OmpSessionService {
     } as SessionDetail;
   }
 
-  fork(_input: { id: string; title?: string; throughMessageId?: string }): SessionDetail {
-    throw Object.assign(new Error("Forking omp sessions from the desktop app is not supported yet; use `/fork` in the chat"), {
-      errorCode: "OMP_UNSUPPORTED",
+  /** Fork with omp's own `fork` command; the original session is untouched. */
+  async fork(input: { id: string; title?: string; throughMessageId?: string }): Promise<SessionDetail> {
+    const record = this.record(input.id);
+    const entryId = input.throughMessageId ? this.resolveEntryId(record, input.throughMessageId) : undefined;
+    const newPath = await this.withSessionProcess(record, async (rpc) => {
+      const result = await rpc.request<{ cancelled?: boolean }>({ type: "fork", ...(entryId ? { entryId } : {}) });
+      if (result?.cancelled) throw Object.assign(new Error("omp cancelled the fork"), { errorCode: "OMP_FORK_CANCELLED" });
+      if (input.title?.trim()) await rpc.request({ type: "set_session_name", name: input.title.trim() }).catch(() => undefined);
+      const state = await rpc.request<{ sessionFile?: string }>({ type: "get_state" });
+      if (!state?.sessionFile) throw new Error("omp did not report the forked session file");
+      return state.sessionFile;
     });
+    let real = newPath;
+    try { real = realpathSync(newPath); } catch { /* keep as reported */ }
+    const file = parseOmpSession(real);
+    const id = this.idForPath(real);
+    const forked: SessionRecord = {
+      id,
+      cwd: file?.cwd ?? record.cwd,
+      path: real,
+      createdAt: file?.createdAt ?? new Date().toISOString(),
+      title: input.title?.trim() || (file?.title ? undefined : record.title),
+    };
+    this.records.set(id, forked);
+    return this.detail(id)!;
   }
 
   private async runtimeFor(id: string, notify: OmpNotifier): Promise<OmpSessionRuntime> {
@@ -447,11 +755,17 @@ export class OmpSessionService {
       id,
       cwd: record.cwd,
       sessionPath: record.path && existsSync(record.path) ? record.path : undefined,
+      // An explicit choice wins; a fresh chat falls back to the remembered model.
+      model: record.model ?? (record.path && existsSync(record.path) ? undefined : this.newSessionModel()),
+      thinkingLevel: record.thinkingLevel ?? (record.path && existsSync(record.path) ? undefined : this.prefs().thinkingLevel),
       agentDir: this.agentDir,
       notify,
       onSessionFile: (path) => {
         let real = path;
         try { real = realpathSync(path); } catch { /* not written yet */ }
+        // A live process only moves files on `branch` (edit / regenerate):
+        // the pre-edit file stays on disk but is no longer this chat.
+        if (record.path && record.path !== real) this.hideFile(record.path);
         record.path = real;
         this.pathIds.set(real, id);
       },
@@ -470,14 +784,33 @@ export class OmpSessionService {
     }
   }
 
-  async prompt(id: string, content: string, notify: OmpNotifier, userMessageId?: string): Promise<{ accepted: true; turnId: string }> {
+  async prompt(
+    id: string,
+    content: string,
+    notify: OmpNotifier,
+    userMessageId?: string,
+    options: { truncateFromMessageId?: string; attachments?: OmpPromptAttachment[] } = {},
+  ): Promise<{ accepted: true; turnId: string }> {
     if (this.runtimes.get(id)?.isRunning) {
       throw Object.assign(new Error("session already has an active turn"), { errorCode: "AGENT_BUSY" });
     }
+    const prepared = prepareOmpPrompt(content, options.attachments);
+    const record = this.record(id);
+    const branchEntry = options.truncateFromMessageId ? this.resolveEntryId(record, options.truncateFromMessageId) : undefined;
     const runtime = await this.runtimeFor(id, notify);
     runtime.setNotifier(notify);
+    runtime.onTurnSettled = (optimistic) => {
+      // After an edit/regenerate omp re-writes the turn into a new branch file,
+      // so the id the transcript still shows must point at the new entry too.
+      const keys = [optimistic, options.truncateFromMessageId].filter((key): key is string => Boolean(key));
+      if (keys.length === 0) return;
+      const users = this.readFile(record)?.messages.filter((message) => message.role === "user") ?? [];
+      const last = users.at(-1);
+      if (last) for (const key of keys) this.aliases.set(key, last.id);
+    };
+    if (branchEntry) await runtime.branchBefore(branchEntry);
     const turnId = randomUUID();
-    void runtime.prompt(content, turnId, userMessageId).catch((error) => {
+    void runtime.prompt(prepared.message, turnId, userMessageId, prepared.images).catch((error) => {
       notify({
         sessionId: id,
         turnId,
@@ -525,3 +858,4 @@ export function ompSessionService(): OmpSessionService {
   shared ??= new OmpSessionService();
   return shared;
 }
+export { listOmpRoles, setOmpRole, type OmpRole } from "./roles.js";

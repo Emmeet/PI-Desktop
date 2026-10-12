@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { expandMcpInvocation } from "../composer-mcp";
 import { IPC, ErrorCodes, compactionRecordId, findSkillMentions, isGlobalPermissionMode, isRpcTimeoutError, type AgentEventEnvelope, type AgentPromptRequest, type AgentSteerRequest, type UiMessage, type AgentQueuePushRequest, type AgentStopRequest, type AgentStopSubagentsRequest, type AskToolResolution, type GlobalPermissionMode, type MessageUsage, type PendingInteractiveRequests, type PlanExecutionFinishStatus, type PlanResolutionResult, type PlanResolveRequest, type VoiceOrigin } from "@pi-desktop/shared";
 import type { FinishTurn } from "../runtime/plans";
@@ -188,16 +189,27 @@ export function registerAgentIpc({
           errorCode: "NATIVE_PI_UNSUPPORTED",
         });
       }
-      if (req.sessionMessageId || req.truncateFromMessageId || req.truncateBefore !== undefined || req.attachments?.length) {
-        throw Object.assign(new Error("omp sessions currently support text prompts only (no attachments or message edits)"), {
+      if (req.sessionMessageId || (req.truncateBefore !== undefined && !req.truncateFromMessageId)) {
+        throw Object.assign(new Error("This kind of message is not supported in omp sessions"), {
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
+      // omp reads the files itself: forward only absolute local paths.
+      const attachments = (req.attachments ?? [])
+        .filter((attachment) => typeof attachment?.path === "string" && isAbsolute(attachment.path))
+        .map((attachment) => ({
+          path: attachment.path,
+          name: attachment.name,
+          kind: attachment.kind === "image" ? "image" : "file",
+          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        }));
       setNotificationViewingSessionId(req.sessionId);
       return sidecar.call("agent.prompt", {
         sessionId: req.sessionId,
         content: req.content,
         userMessageId: req.messageId,
+        ...(req.truncateFromMessageId ? { truncateFromMessageId: req.truncateFromMessageId } : {}),
+        ...(attachments.length ? { attachments } : {}),
       });
     }
     if (!host) throw new Error("host unavailable");

@@ -439,6 +439,31 @@ async function handle(method: string, params: any): Promise<unknown> {
         }),
       };
     }
+    case "omp.models.list": {
+      return (await loadOmp()).ompSessionService().listModels({ refresh: params.refresh === true });
+    }
+    case "omp.model.set": {
+      const session = await (await loadOmp()).ompSessionService().setModel({
+        sessionId: typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined,
+        provider: String(params.provider ?? ""),
+        modelId: String(params.modelId ?? ""),
+      });
+      return { session };
+    }
+    case "omp.roles.list": {
+      return { roles: await (await loadOmp()).listOmpRoles() };
+    }
+    case "omp.roles.set": {
+      const model = typeof params.model === "string" && params.model.trim() ? params.model.trim() : null;
+      return { roles: await (await loadOmp()).setOmpRole(String(params.role ?? ""), model) };
+    }
+    case "omp.thinking.set": {
+      const session = await (await loadOmp()).ompSessionService().setThinkingLevel({
+        sessionId: typeof params.sessionId === "string" && params.sessionId ? params.sessionId : undefined,
+        level: String(params.level ?? ""),
+      });
+      return { session };
+    }
     case "native.session.create": {
       return {
         session: (await loadOmp()).ompSessionService().create({
@@ -447,10 +472,19 @@ async function handle(method: string, params: any): Promise<unknown> {
         }),
       };
     }
+    case "native.session.rename": {
+      const service = (await loadOmp()).ompSessionService();
+      return { ok: true, session: await service.rename(String(params.id ?? ""), String(params.title ?? "")) };
+    }
+    case "native.session.delete": {
+      const service = (await loadOmp()).ompSessionService();
+      await service.delete(String(params.id ?? ""));
+      return { ok: true };
+    }
     case "native.session.fork": {
       const service = await getNativePiService(String(params.id ?? ""));
       return {
-        session: service.fork({
+        session: await service.fork({
           id: String(params.id ?? ""),
           title: typeof params.title === "string" ? params.title : undefined,
           throughMessageId:
@@ -466,10 +500,16 @@ async function handle(method: string, params: any): Promise<unknown> {
       const content = String(params.content ?? "");
       if (sessionId.startsWith(NATIVE_PI_SESSION_PREFIX)) {
         const service = await getNativePiService(sessionId);
-        return service.prompt(sessionId, content, (envelope) =>
-          notify("native.agent.event", envelope),
-          typeof params.userMessageId === "string" ? params.userMessageId : undefined,
-        );
+        const userMessageId = typeof params.userMessageId === "string" ? params.userMessageId : undefined;
+        const onEvent = (envelope: AgentEventEnvelope) => notify("native.agent.event", envelope);
+        if (service instanceof (await loadOmp()).OmpSessionService) {
+          return service.prompt(sessionId, content, onEvent, userMessageId, {
+            truncateFromMessageId:
+              typeof params.truncateFromMessageId === "string" ? params.truncateFromMessageId : undefined,
+            attachments: Array.isArray(params.attachments) ? (params.attachments as any[]) : undefined,
+          });
+        }
+        return service.prompt(sessionId, content, onEvent, userMessageId);
       }
       const turnId =
         typeof params.turnId === "string" && params.turnId.trim()

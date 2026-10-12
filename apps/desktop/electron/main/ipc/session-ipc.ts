@@ -170,6 +170,32 @@ export function registerSessionIpc({
       ].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))),
     };
   });
+  handle(IPC.invoke.ompModelsList, async (input: { refresh?: boolean } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.models.list", { refresh: input?.refresh === true });
+  });
+  handle(IPC.invoke.ompModelSet, async (input: { sessionId?: string; provider?: string; modelId?: string } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    if (typeof input?.provider !== "string" || !input.provider || typeof input.modelId !== "string" || !input.modelId) {
+      throw Object.assign(new Error("provider and modelId are required"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+    }
+    return sidecar.call("omp.model.set", input);
+  });
+  handle(IPC.invoke.ompRolesList, async () => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.roles.list", {});
+  });
+  handle(IPC.invoke.ompRoleSet, async (input: { role?: string; model?: string | null } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    if (typeof input?.role !== "string" || !input.role) {
+      throw Object.assign(new Error("role is required"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+    }
+    return sidecar.call("omp.roles.set", { role: input.role, model: typeof input.model === "string" ? input.model : null });
+  });
+  handle(IPC.invoke.ompThinkingSet, async (input: { sessionId?: string; level?: string } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.thinking.set", input);
+  });
   handle(IPC.invoke.sessionCreate, async (input = {}) => {
     if (OMP_ONLY) {
       if (!sidecar) throw new Error("agent sidecar unavailable");
@@ -343,9 +369,11 @@ export function registerSessionIpc({
   });
   handle(IPC.invoke.sessionDelete, async (id: string) => {
     if (id.startsWith("native-pi:")) {
-      throw Object.assign(new Error("Native Pi sessions cannot be deleted from PI-Desktop"), {
-        errorCode: ErrorCodes.INVALID_ARGUMENT,
-      });
+      // omp session: the sidecar removes omp's session file (the renderer confirms first).
+      if (!sidecar) throw new Error("sidecar unavailable");
+      const res = await sidecar.call("native.session.delete", { id });
+      logger.app("session", "info", "omp session deleted", { sessionId: id });
+      return res;
     }
     if (!host) throw new Error("host unavailable");
     const res = await host.call("session.delete", { id });
@@ -365,9 +393,8 @@ export function registerSessionIpc({
   });
   handle(IPC.invoke.sessionRename, async (id: string, title: string) => {
     if (id.startsWith("native-pi:")) {
-      throw Object.assign(new Error("Native Pi session rename is not supported"), {
-        errorCode: ErrorCodes.INVALID_ARGUMENT,
-      });
+      if (!sidecar) throw new Error("sidecar unavailable");
+      return sidecar.call("native.session.rename", { id, title: String(title ?? "").slice(0, 200) });
     }
     if (!host) throw new Error("host unavailable");
     return host.call("session.rename", { id, title });

@@ -12,6 +12,8 @@ const STEP_LOCALE_KEY: Record<string, string> = {
   plugin: "loadPlugin",
 };
 
+const OMP_HANDLED_STEPS = new Set(["provider", "secret", "prompt"]);
+
 /** First-run inline checklist (D021): rendered on the empty chat home until
  * every step is done or the user dismisses it. State comes from the host
  * (app.getOnboarding); actions deep-link into the relevant surface. */
@@ -23,7 +25,9 @@ export function OnboardingChecklist() {
   const openProject = useAppStore((s) => s.openProject);
 
   if (!onboarding?.showChecklist) return null;
-  const steps = onboarding.steps ?? [];
+  // omp owns models and logins, and the host never sees omp prompts, so the
+  // provider / API key / first-message steps would never complete here.
+  const steps = (onboarding.steps ?? []).filter((step) => !OMP_HANDLED_STEPS.has(step.id));
   if (steps.length === 0 || steps.every((s) => s.done)) return null;
 
   const stepLabel = (id: string, fallback: string) => {

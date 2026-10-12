@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -66,6 +66,9 @@ process.stdin.on("data", (chunk) => {
   let i;
   while ((i = buf.indexOf("\\n")) >= 0) {
     const cmd = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+    if (process.env.FAKE_OMP_LOG) fs.appendFileSync(process.env.FAKE_OMP_LOG, JSON.stringify({ cmd: cmd.type, provider: cmd.provider, modelId: cmd.modelId, level: cmd.level, argv: process.argv.slice(2) }) + "\\n");
+    if (cmd.type === "get_available_models") out({ type: "response", id: cmd.id, command: cmd.type, success: true, data: { models: [{ provider: "p1", id: "m1", name: "Model One", reasoning: true, apiKey: "SECRET", headers: { Authorization: "x" } }] } });
+    if (cmd.type === "set_model" || cmd.type === "set_thinking_level") out({ type: "response", id: cmd.id, command: cmd.type, success: true });
     if (cmd.type === "get_state") out({ type: "response", id: cmd.id, command: "get_state", success: true, data: { sessionFile: file } });
     if (cmd.type === "prompt") {
       out({ type: "response", id: cmd.id, command: "prompt", success: true });
@@ -134,5 +137,45 @@ describe("OmpSessionService", () => {
     const service = new OmpSessionService({ agentDir: join(root, "agent") });
     const created = service.create({ projectPath: root });
     await expect(service.prompt(created.id, "hi", () => undefined)).rejects.toMatchObject({ errorCode: "OMP_NOT_FOUND" });
+  });
+});
+
+describe("omp model selection", () => {
+  it("lists omp's models without secrets and applies + remembers a chosen model", async () => {
+    const root = tmp();
+    const bin = join(root, "omp");
+    writeFileSync(bin, FAKE_OMP);
+    chmodSync(bin, 0o755);
+    const sessionRoot = join(root, "agent", "sessions");
+    mkdirSync(sessionRoot, { recursive: true });
+    const log = join(root, "log.jsonl");
+    process.env.PI_DESKTOP_OMP_BIN = bin;
+    process.env.FAKE_OMP_SESSIONS = sessionRoot;
+    process.env.FAKE_OMP_LOG = log;
+    process.env.PI_DESKTOP_OMP_PREFS = join(root, "prefs.json");
+    delete process.env.PI_DESKTOP_OMP_MODEL;
+
+    const service = new OmpSessionService({ agentDir: join(root, "agent"), sessionRoot });
+    const catalog = await service.listModels();
+    expect(catalog.models).toEqual([{ provider: "p1", id: "m1", name: "Model One", reasoning: true }]);
+
+    const created = service.create({ projectPath: root });
+    await service.setModel({ sessionId: created.id, provider: "p1", modelId: "m1" });
+    await service.setThinkingLevel({ sessionId: created.id, level: "high" });
+    expect(JSON.parse(readFileSync(join(root, "prefs.json"), "utf8"))).toEqual({ model: { provider: "p1", modelId: "m1" }, thinkingLevel: "high" });
+
+    await new Promise<void>((resolve) => {
+      void service.prompt(created.id, "hi", (envelope) => { if (envelope.event.type === "agent_end") resolve(); });
+    });
+    await service.setModel({ sessionId: created.id, provider: "p1", modelId: "m2" });
+    const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const prompt = calls.find((call) => call.cmd === "prompt");
+    expect(prompt.argv).toEqual(expect.arrayContaining(["--model", "p1/m1", "--thinking", "high"]));
+    expect(calls).toEqual(expect.arrayContaining([expect.objectContaining({ cmd: "set_model", provider: "p1", modelId: "m2" })]));
+    expect(service.detail(created.id)).toMatchObject({ providerId: "p1", modelId: "m2", thinkingLevel: "high" });
+
+    const again = new OmpSessionService({ agentDir: join(root, "agent"), sessionRoot });
+    expect(again.newSessionModel()).toEqual({ provider: "p1", modelId: "m2" });
+    service.disposeAll();
   });
 });
