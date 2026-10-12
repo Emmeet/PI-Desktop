@@ -313,29 +313,10 @@ test("a pin keeps the full configured model id even when its suffix is another m
   assert.equal(subagentModelOrphanPin("anthropic/model", prefixedOnly), "anthropic/model");
 });
 
-test("the editor model field is a configured-only searchable picker with an empty-state action", async () => {
-  const source = await readFile(
-    new URL("../src/components/settings/SubagentEditorSheet.tsx", import.meta.url),
-    "utf8",
-  );
-  const modelField = source.slice(
-    source.indexOf('label={t("extensions.subagents.model")}'),
-    source.indexOf('label={t("extensions.subagents.thinking")}'),
-  );
-  // A definition may pin any configured model, so the list is long enough that
-  // a native <select> cannot serve it: the field is an anchored menu with a
-  // filter field and its own scroll bound.
-  assert.match(modelField, /<SubagentModelPicker/);
-  assert.doesNotMatch(modelField, /<Select/);
-  assert.doesNotMatch(modelField, /<optgroup/);
-  assert.match(modelField, /extensions\.subagents\.modelPickEmpty/);
-  assert.match(modelField, /extensions\.subagents\.modelPickEmptyAction/);
-  assert.match(modelField, /setSettingsTab\("agent"\)/);
-  // No hand-typed model id: the field never renders a free-text input.
-  assert.doesNotMatch(modelField, /<Input/);
-  assert.doesNotMatch(modelField, /modelPickCustom/);
-  assert.match(source, /subagentModelChoices\(providers\)/);
-  assert.match(source, /resetSubagentTemplate\(draft\)/);
+test("the editor model field lists omp models and roles", async () => {
+  const source = await readFile(new URL("../src/components/settings/SubagentEditorSheet.tsx", import.meta.url), "utf8");
+  assert.match(source, /useOmpModelChoices\(\)/);
+  assert.doesNotMatch(source, /SubagentFallbackModels/);
 });
 
 test("the model menu scrolls inside itself and filters, instead of using an OS-drawn list", async () => {
@@ -370,15 +351,8 @@ test("the shared option-menu styles bound the list height and let it scroll", as
   assert.match(menu[1], /max-height:/);
 });
 
-test("the editor exposes the no-pass thinking option", async () => {
-  const source = await readFile(
-    new URL("../src/components/settings/SubagentEditorSheet.tsx", import.meta.url),
-    "utf8",
-  );
-  const thinkingField = source.slice(
-    source.indexOf('label={t("extensions.subagents.thinking")}'),
-  );
-  assert.match(thinkingField, /id: "omit"/);
-  assert.match(thinkingField, /extensions\.subagents\.thinkingOmit/);
-  assert.match(thinkingField, /SUBAGENT_THINKING_LEVELS/);
+test("the editor thinking options follow the chosen omp model", async () => {
+  const source = await readFile(new URL("../src/components/settings/SubagentEditorSheet.tsx", import.meta.url), "utf8");
+  assert.match(source, /omp\.levelsFor\(value\)/);
+  assert.match(source, /extensions\.subagents\.thinkingInherit/);
 });

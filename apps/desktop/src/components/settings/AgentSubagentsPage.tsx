@@ -183,10 +183,10 @@ export function AgentSubagentsPage() {
       tools: mergeSubagentToolGrant(draft.inheritTools, draft.tools),
       // An empty string clears a pinned model; omitting it would keep the old one.
       model: draft.model.trim(),
-      fallbackModels: draft.fallbackModels.map((pin) => pin.trim()),
+      // omp agents have no fallback chain or output cap: always clear them.
+      fallbackModels: [],
       thinkingLevel: draft.thinkingLevel,
-      // `0` clears the output cap, so the delegate follows the model again.
-      maxTokens: draft.maxTokens,
+      maxTokens: 0,
       enabled: draft.enabled,
       scope: draft.scope,
     };
@@ -272,7 +272,15 @@ export function AgentSubagentsPage() {
         off={!definition.enabled}
         command={t("extensions.subagents.handle", { name: handle })}
         badges={
-          <span className="agent-capability-badge">{t("extensions.subagents.sourceBuiltin")}</span>
+          <span className="agent-capability-badge">
+            {definition.origin === "user"
+              ? t("extensions.subagents.sourceOmpUser")
+              : definition.origin === "project"
+                ? t("extensions.subagents.sourceOmpProject")
+                : definition.origin === "bundled"
+                  ? t("extensions.subagents.sourceOmpBundled")
+                  : t("extensions.subagents.sourceBuiltin")}
+          </span>
         }
         description={definition.description || t("settings.noCapabilityDescription")}
         meta={

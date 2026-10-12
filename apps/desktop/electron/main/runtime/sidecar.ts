@@ -13,6 +13,7 @@ import { registerPluginDevTools } from "../plugin-dev-tools";
 import { resolveLocalFile } from "../browser-view";
 import { catalogModelConfigFor } from "../models-dev-catalog";
 import { AgentSidecar } from "../agent-sidecar";
+import { ompNotificationHub } from "../omp-notifications";
 import { relaxedNetworkPolicyEnabled } from "../endpoint-policy";
 import { OAUTH_AUTH_KIND, type VendorOAuth } from "../oauth";
 import type { AgentExtensionBridge } from "../agent-extensions";
@@ -179,6 +180,49 @@ export function createSidecarRuntime({
       );
     }
   };
+
+  /** omp turns that reported an error before their `agent_end`. */
+  const ompFailedTurns = new Map<string, string>();
+  /**
+   * Completion/failure notifications and scheduled-run bookkeeping for omp
+   * sessions, which never pass through host-core's turn table.
+   */
+  const onOmpTerminalEvent = async (sidecar: AgentSidecar, envelope: AgentEventEnvelope) => {
+    const event = envelope.event as { type: string; error?: { code?: string } };
+    const key = `${envelope.sessionId}:${envelope.turnId ?? ""}`;
+    if (event.type === "error") {
+      ompFailedTurns.set(key, event.error?.code ?? "ERROR");
+      return;
+    }
+    if (event.type !== "agent_end") return;
+    const errorCode = ompFailedTurns.get(key);
+    ompFailedTurns.delete(key);
+    const sessionId = envelope.sessionId;
+    const runId = ompNotificationHub.scheduledRuns.get(sessionId);
+    if (runId) {
+      ompNotificationHub.scheduledRuns.delete(sessionId);
+      await runtimeState.host
+        ?.call("scheduled.finishRun", { runId, status: errorCode ? "error" : "completed", ...(errorCode ? { errorCode } : {}) })
+        .catch((error) => logger.app("persistence", "warn", "finishRun failed", { sessionId, data: String(error) }));
+    }
+    const store = ompNotificationHub.store;
+    if (!store || !(runId || ompNotificationHub.shouldCreate(sessionId))) return;
+    let title = "";
+    try {
+      const got = await sidecar.call<{ session?: { title?: string } | null }>("native.session.get", { id: sessionId, messageLimit: 1 });
+      title = got.session?.title ?? "";
+    } catch {
+      /* untitled */
+    }
+    const notification = store.add({
+      kind: errorCode ? "task.failed" : "task.completed",
+      sessionId,
+      sessionTitle: title || "OMP",
+      turnId: envelope.turnId ?? `${sessionId}:${envelope.ts}`,
+      ...(errorCode ? { errorCode } : {}),
+    });
+    if (notification) sendToRenderer(IPC.event.notificationChanged, { notification });
+  };
   const wireSidecar = (s: AgentSidecar) => {
 
   s.onNotification((method, params) => {
@@ -186,6 +230,7 @@ export function createSidecarRuntime({
       // Native AgentSession already persisted the event to its canonical Pi
       // JSONL. It owns neither the Desktop outbox nor Host queue/turn state.
       sendToRenderer(IPC.event.agentMessage, params as AgentEventEnvelope);
+      void onOmpTerminalEvent(s, params as AgentEventEnvelope);
       return;
     }
     if (method === "agent.event") {

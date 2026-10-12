@@ -173,6 +173,8 @@ export function createLauncher({
   }
 
   function prewarmPluginLauncher(): void {
+    // OMP Desktop: the plugin launcher is disabled, so do not build its window.
+    if (process.env.OMP_DESKTOP_ALLOW_PLUGINS !== "1") return;
     void createPluginLauncherWindow().catch((error) => {
       logger.app("diagnostics", "warn", "plugin launcher warm-up failed", {
         data: String(error),
@@ -199,6 +201,7 @@ export function createLauncher({
   }
 
   async function togglePluginLauncher(): Promise<void> {
+    if (process.env.OMP_DESKTOP_ALLOW_PLUGINS !== "1") return;
     const window = state.pluginLauncherWindow;
     if (window && !window.isDestroyed() && window.isVisible()) {
       window.hide();

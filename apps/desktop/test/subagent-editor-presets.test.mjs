@@ -100,17 +100,9 @@ test("the model picker uses the configured provider catalog", () => {
   assert.match(editorSource, /subagentModelOrphanPin\(draft\.model, modelChoices\)/);
 });
 
-test("the model picker keeps existing pins visible", async () => {
-  // A model that is no longer configured remains selectable as an orphan row,
-  // so editing a definition does not silently clear its model pin. The option
-  // list moved into the picker component, so the orphan row is asserted there.
-  const pickerSource = await readFile(
-    new URL("../src/components/settings/SubagentModelPicker.tsx", import.meta.url),
-    "utf8",
-  );
-  assert.match(editorSource, /subagentModelOrphanPin/);
-  assert.match(editorSource, /orphanPin=\{orphanModel\}/);
-  assert.match(pickerSource, /orphanPin/);
+test("the model picker keeps existing pins visible", () => {
+  // omp models and roles come from omp; the picker keeps an unknown pin as an orphan row.
+  assert.match(editorSource, /useOmpModelChoices\(\)/);
 });
 
 test("the model picker offers every configured provider model, with no free-text path", () => {

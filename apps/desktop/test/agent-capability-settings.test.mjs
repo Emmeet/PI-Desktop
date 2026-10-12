@@ -347,7 +347,7 @@ test("Settings lists shipped builtin subagents with a switch of their own", () =
   const api = read("../src/lib/api.ts");
   assert.match(subagentSettings, /api\.subagentCatalog/);
   assert.match(subagentSettings, /item\.source === "builtin"/);
-  assert.match(subagentSettings, /fallbackBuiltinDefinitions/);
+  assert.doesNotMatch(subagentSettings, /fallbackBuiltinDefinitions/);
   assert.match(subagentSettings, /owned\.filter\(\(row\) => row\.enabled\)/);
   assert.match(subagentSettings, /catalog\.builtins/);
   assert.match(subagents, /extensions\.subagents\.sourceBuiltin/);

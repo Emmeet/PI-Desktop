@@ -73,48 +73,12 @@ test("host-core parses, clamps, renders and clears the cap", () => {
   assert.match(hostSource, /next\.max_tokens = match input\.max_tokens \{/);
 });
 
-test("the editor draft round-trips the cap through create, edit and save", () => {
-  assert.match(editorSource, /\/\*\*[\s\S]*?maxTokens: number;/);
-  assert.match(editorSource, /maxTokens: 0,/);
-  assert.match(editorSource, /maxTokens: record\.maxTokens \?\? 0,/);
-  assert.match(
-    editorSource,
-    /maxTokens: Number\.parseInt\(event\.target\.value, 10\) \|\| 0/,
-  );
-  assert.match(editorSource, /return "extensions\.subagents\.errorMaxTokens";/);
-  // The draft value is what the settings API receives.
-  assert.match(pageSource, /maxTokens: draft\.maxTokens,/);
+test("the editor no longer round-trips a max-token cap", () => {
+  assert.match(pageSource, /maxTokens: 0/);
 });
 
-test("the cap is edited in the existing Advanced area, ahead of the scope field", () => {
-  assert.match(
-    editorSource,
-    /function AdvancedFields\(/,
-  );
-  // The Advanced disclosure owns the output limit: the field must sit after
-  // the disclosure body opens and before the scope group that follows it.
-  assert.match(
-    editorSource,
-    /id="subagent-sheet-advanced"[\s\S]*?extensions\.subagents\.maxTokens"\)/,
-  );
-  assert.match(
-    editorSource,
-    /extensions\.subagents\.maxTokens"\)[\s\S]*?t\("settings\.scope"\)/,
-  );
-  assert.match(
-    editorSource,
-    /hint=\{t\("extensions\.subagents\.maxTokensHint", \{[\s\S]*?max: MAX_SUBAGENT_MAX_TOKENS\.toLocaleString\(\)/,
-  );
-  assert.match(editorSource, /max=\{MAX_SUBAGENT_MAX_TOKENS\}/);
-  assert.match(
-    editorSource,
-    /placeholder=\{t\("extensions\.subagents\.maxTokensDefault"\)\}/,
-  );
-  // Cleared means "follow the model", so the input shows nothing rather than 0.
-  assert.match(
-    editorSource,
-    /value=\{draft\.maxTokens > 0 \? String\(draft\.maxTokens\) : ""\}/,
-  );
+test("omp has no output cap, so the editor does not offer one", () => {
+  assert.doesNotMatch(editorSource, /extensions\.subagents\.maxTokens"\)/);
 });
 
 test("the runtime overrides the built model instead of replacing it", () => {

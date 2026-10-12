@@ -12,7 +12,9 @@ import { registerAppIpc } from "./app-ipc";
 import { registerDiagnosticsIpc } from "./diagnostics-ipc";
 import { registerMarketIpc } from "./market-ipc";
 import { registerMcpIpc } from "./mcp-ipc";
-import { createOmpCapabilitySync } from "../omp-capability-sync";
+import { createOmpNotificationStore, ompNotificationHub } from "../omp-notifications";
+import { shouldCreateTaskNotification } from "../notification-policy";
+import { createOmpCapabilitySync, ompAgentCatalog, setOmpAgentEnabled } from "../omp-capability-sync";
 import type { McpOAuthManager } from "../mcp-oauth";
 import { searchMcpMarket } from "../mcp-registry-catalog";
 import { registerNotificationIpc } from "./notification-ipc";
@@ -242,6 +244,18 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     updater,
   });
   registerStorageIpc({ registrar, getMainWindow, restart: dependencies.restartForStorage });
+  ompNotificationHub.store ??= createOmpNotificationStore(dataDir);
+  ompNotificationHub.announce = (notification) => sendToRenderer(IPC.event.notificationChanged, { notification });
+  ompNotificationHub.shouldCreate = (sessionId) => {
+    const window = getMainWindow();
+    const live = window !== null && !window.isDestroyed();
+    return shouldCreateTaskNotification({
+      finishingSessionId: sessionId,
+      viewingSessionId: getNotificationViewingSessionId(),
+      windowVisible: live && window.isVisible(),
+      windowFocused: live && window.isFocused(),
+    });
+  };
   registerNotificationIpc({
     registrar,
     getHost,
@@ -249,6 +263,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     getViewingSessionId: getNotificationViewingSessionId,
     setViewingSessionId: setNotificationViewingSessionId,
     sendToRenderer,
+    ompNotifications: ompNotificationHub.store,
   });
   registerSessionIpc({
     registrar,
@@ -462,6 +477,10 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     disabledBuiltinSubagents,
     stripWinLongPrefix,
     sendToRenderer: syncingSendToRenderer,
+    ompAgents: {
+      catalog: (projectPath) => ompAgentCatalog({ dataDir, projectPath }),
+      setEnabled: setOmpAgentEnabled,
+    },
     logger,
   });
 

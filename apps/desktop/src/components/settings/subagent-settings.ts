@@ -1,5 +1,4 @@
 import {
-  fallbackBuiltinDefinitions,
   type SubagentDefinition,
   type UserSubagentRecord,
 } from "@pi-desktop/shared";
@@ -11,7 +10,11 @@ import { api } from "../../lib/api";
  * A switched-off builtin stays in the list on purpose: it has no document to
  * delete, so its row and its switch are the only way back on.
  */
-export type BuiltinSubagentRow = SubagentDefinition & { enabled: boolean };
+export type BuiltinSubagentRow = SubagentDefinition & {
+  enabled: boolean;
+  /** Where omp finds this agent. */
+  origin?: "bundled" | "user" | "project";
+};
 
 /** User-owned documents plus the shipped defaults, switched off ones included. */
 export type SubagentPageData = {
@@ -53,9 +56,9 @@ export async function fetchSubagentPageData(): Promise<SubagentPageData> {
   } catch {
     return {
       owned,
-      builtins: fallbackBuiltinDefinitions()
-        .map((item) => ({ ...item, enabled: true }))
-        .filter((item) => !enabledHandles.has(item.name)),
+      // omp's agents could not be read; never fall back to the app's own
+      // presets, which omp does not have.
+      builtins: [],
     };
   }
 }

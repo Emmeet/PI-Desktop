@@ -30,7 +30,7 @@ import {
   subagentModelSelectValue,
 } from "./subagent-models";
 import { SubagentModelPicker } from "./SubagentModelPicker";
-import { SubagentFallbackModels } from "./SubagentFallbackModels";
+import { useOmpModelChoices } from "./omp-subagent-models";
 import { SettingsMenuSelect } from "./SettingsMenuSelect";
 
 /** Hard cap host-core enforces on a definition document. */
@@ -251,7 +251,8 @@ export function subagentDraftError(draft: SubagentDraft): string | null {
   // the picker offers those, so rejecting them here would make a selectable
   // option impossible to save. This shares the picker's own splitter so the two
   // can never disagree.
-  if ([draft.model, ...draft.fallbackModels].some((pin) => pin.trim() && !subagentModelPinParts(pin.trim()))) {
+  // omp role references (`@smol`) are valid alongside `provider/model` pins.
+  if ([draft.model].some((pin) => pin.trim() && !pin.trim().startsWith("@") && !subagentModelPinParts(pin.trim()))) {
     return "extensions.subagents.errorModel";
   }
   // Cleared (`0`) is a valid state that means "no cap of our own", so only a
@@ -408,40 +409,32 @@ function ModelField({
   orphanModel: string | null;
 }) {
   const { t } = useTranslation();
-  const modelValue = subagentModelSelectValue(draft.model, modelChoices);
+  void modelChoices;
+  void providers;
+  void modelGroups;
+  void orphanModel;
+  const omp = useOmpModelChoices();
+  const value = draft.model.trim();
+  const known = omp.groups.some((group) => group.choices.some((choice) => choice.value === value));
+  const levels = omp.levelsFor(value);
 
   return (
     <>
       <div className="ext-field-pair">
         <Field
           label={t("extensions.subagents.model")}
-          hint={
-            modelChoices.length > 0
-              ? t("extensions.subagents.modelHint")
-              : t("extensions.subagents.modelPickEmpty")
-          }
+          hint={t("extensions.subagents.ompModelHint")}
         >
-          {modelChoices.length === 0 ? (
-            <div className="ext-field-empty">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  const store = useAppStore.getState();
-                  store.setSettingsTab("agent");
-                }}
-              >
-                {t("extensions.subagents.modelPickEmptyAction")}
-              </Button>
-            </div>
-          ) : (
-            <SubagentModelPicker
-              value={modelValue}
-              groups={modelGroups}
-              orphanPin={orphanModel}
-              onChange={(next) => setDraft({ ...draft, model: next })}
-            />
-          )}
+          <SubagentModelPicker
+            value={value}
+            groups={omp.groups}
+            orphanPin={value && !known ? value : null}
+            onChange={(next) => {
+              const nextLevels = omp.levelsFor(next);
+              const level = draft.thinkingLevel && nextLevels && !nextLevels.includes(draft.thinkingLevel) ? "" : draft.thinkingLevel;
+              setDraft({ ...draft, model: next, thinkingLevel: level as SubagentThinkingLevel | "" });
+            }}
+          />
         </Field>
         <Field
           label={t("extensions.subagents.thinking")}
@@ -459,21 +452,13 @@ function ModelField({
             }
             options={[
               { id: "", label: t("extensions.subagents.thinkingInherit") },
-              { id: "omit", label: t("extensions.subagents.thinkingOmit") },
-              ...SUBAGENT_THINKING_LEVELS.filter((level) => level !== "omit").map(
+              ...(levels ?? SUBAGENT_THINKING_LEVELS.filter((level) => level !== "omit")).map(
                 (level) => ({ id: level, label: level }),
               ),
             ]}
           />
         </Field>
       </div>
-      <SubagentFallbackModels
-        primary={draft.model}
-        values={draft.fallbackModels}
-        choices={modelChoices}
-        providers={providers}
-        onChange={(fallbackModels) => setDraft({ ...draft, fallbackModels })}
-      />
     </>
   );
 }
@@ -520,26 +505,6 @@ function AdvancedFields({
           modelGroups={modelGroups}
           orphanModel={orphanModel}
         />
-        <Field
-          label={t("extensions.subagents.maxTokens")}
-          hint={t("extensions.subagents.maxTokensHint", {
-            max: MAX_SUBAGENT_MAX_TOKENS.toLocaleString(),
-          })}
-        >
-          <Input
-            type="number"
-            min={1}
-            max={MAX_SUBAGENT_MAX_TOKENS}
-            placeholder={t("extensions.subagents.maxTokensDefault")}
-            value={draft.maxTokens > 0 ? String(draft.maxTokens) : ""}
-            onChange={(event) =>
-              setDraft({
-                ...draft,
-                maxTokens: Number.parseInt(event.target.value, 10) || 0,
-              })
-            }
-          />
-        </Field>
         <div className="ext-field-group">
           <div className="ext-field-label">{t("settings.scope")}</div>
           <ManagementScope draft={draft} setDraft={setDraft} />

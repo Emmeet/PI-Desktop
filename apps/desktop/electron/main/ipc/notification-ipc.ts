@@ -7,6 +7,8 @@ import {
 import type { IpcRegistrar } from "./types";
 
 export type NotificationIpcDependencies = {
+  /** Notifications for omp sessions, merged into every query. */
+  ompNotifications?: import("../omp-notifications").OmpNotificationStore;
   registrar: IpcRegistrar;
   getHost: () => HostProcess | null;
   getMainWindow: () => Electron.BrowserWindow | null;
@@ -87,6 +89,7 @@ export function registerNotificationIpc({
   getViewingSessionId,
   setViewingSessionId,
   sendToRenderer,
+  ompNotifications,
 }: NotificationIpcDependencies): void {
   const { handle } = registrar;
 
@@ -95,7 +98,8 @@ export function registerNotificationIpc({
     async (input: { unreadOnly?: boolean; limit?: number } = {}) => {
       const host = getHost();
       if (!host) throw new Error("host unavailable");
-      return host.call("notification.list", input);
+      const listed = await host.call<{ notifications?: Array<{ createdAt: string }>; unreadCount?: number }>("notification.list", input);
+      return ompNotifications ? ompNotifications.merge(listed, input) : listed;
     },
   );
 
@@ -103,6 +107,11 @@ export function registerNotificationIpc({
     const host = getHost();
     if (!host) throw new Error("host unavailable");
     const id = typeof input.id === "string" ? input.id.trim() : "";
+    if (id && ompNotifications?.owns(id)) {
+      const ok = ompNotifications.markRead(id);
+      if (ok) dismissTaskNativeNotification(id);
+      return { ok };
+    }
     const result = await host.call<{ ok?: boolean }>("notification.markRead", input);
     if (id && result?.ok !== false) dismissTaskNativeNotification(id);
     return result;
@@ -112,6 +121,7 @@ export function registerNotificationIpc({
     const host = getHost();
     if (!host) throw new Error("host unavailable");
     const requestedAt = Date.now();
+    ompNotifications?.markAllRead();
     const result = await host.call<{ ok?: boolean }>("notification.markAllRead");
     if (result?.ok === false) return result;
     dismissedBefore = Math.max(dismissedBefore, requestedAt);
@@ -123,6 +133,7 @@ export function registerNotificationIpc({
     const host = getHost();
     if (!host) throw new Error("host unavailable");
     const requestedAt = Date.now();
+    ompNotifications?.clear();
     const result = await host.call<{ ok?: boolean }>("notification.clear");
     if (result?.ok === false) return result;
     dismissedBefore = Math.max(dismissedBefore, requestedAt);

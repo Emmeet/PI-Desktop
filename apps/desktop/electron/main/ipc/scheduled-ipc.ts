@@ -1,4 +1,7 @@
-import { IPC } from "@pi-desktop/shared";
+import { IPC, type ScheduledTask } from "@pi-desktop/shared";
+import { ompNotificationHub } from "../omp-notifications";
+
+const OMP_ONLY = process.env.PI_DESKTOP_LEGACY_PI_ENGINE !== "1";
 import type { HostProcess } from "../host-process";
 import type { IpcRegistrar } from "./types";
 import { executeScheduledTask } from "../runtime/scheduled-runner";
@@ -39,10 +42,68 @@ export function registerScheduledIpc({
       });
     },
   );
+
+  /**
+   * omp is the only engine: every run opens a new omp session in the task's
+   * project (omp's `default` role unless the task names a model or role), and
+   * the run is closed from that session's terminal event.
+   */
+  const executeScheduledTaskInOmp = async (host: HostProcess, id: string, automatic: boolean) => {
+    const { tasks } = await host.call<{ tasks?: ScheduledTask[] }>("scheduled.list");
+    const task = (tasks ?? []).find((candidate) => candidate.id === id);
+    const launch = await host.call<{ sessionId: string; prompt: string; runId: string }>("scheduled.run", { id, automatic });
+    let sessionId: string | undefined;
+    try {
+      if (isQuitting() || getHost() !== host) throw new Error("scheduled runtime stopped");
+      const created = (await invoke(IPC.invoke.sessionCreate, [
+        { projectPath: task?.workspacePath ?? null, title: task?.title || undefined },
+      ])) as { session?: { id?: string } };
+      sessionId = created.session?.id;
+      if (!sessionId) throw new Error("omp session was not created");
+      if (task?.providerId && task.modelId) {
+        let provider = task.providerId;
+        let modelId = task.modelId;
+        let level: string | undefined = task.thinkingLevel;
+        if (provider === "omp-role") {
+          const { roles } = (await invoke(IPC.invoke.ompRolesList, [])) as { roles: Array<{ id: string; model: string | null }> };
+          const ref = roles.find((role) => role.id === modelId)?.model ?? "";
+          const [pin, roleLevel] = ref.split(":");
+          const slash = pin.indexOf("/");
+          if (slash > 0) {
+            provider = pin.slice(0, slash);
+            modelId = pin.slice(slash + 1);
+            level = roleLevel || level;
+          } else {
+            provider = "";
+          }
+        }
+        if (provider) await invoke(IPC.invoke.ompModelSet, [{ sessionId, provider, modelId }]);
+        if (level && level !== "omit") await invoke(IPC.invoke.ompThinkingSet, [{ sessionId, level }]);
+      }
+      ompNotificationHub.scheduledRuns.set(sessionId, launch.runId);
+      await invoke(IPC.invoke.agentPrompt, [{ sessionId, content: launch.prompt }]);
+      return { ...launch, sessionId };
+    } catch (error) {
+      await host
+        .call("scheduled.finishRun", { runId: launch.runId, status: "error", errorCode: "SCHEDULE_DISPATCH_FAILED" })
+        .catch(() => {});
+      if (sessionId) ompNotificationHub.scheduledRuns.delete(sessionId);
+      const notification = ompNotificationHub.store?.add({
+        kind: "task.failed",
+        sessionId: sessionId ?? "",
+        sessionTitle: task?.title || "Scheduled task",
+        turnId: `schedule:${launch.runId}`,
+        errorCode: "SCHEDULE_DISPATCH_FAILED",
+      });
+      if (notification) ompNotificationHub.announce(notification);
+      throw error;
+    }
+  };
   registrar.handle(IPC.invoke.scheduledExecute, async (id: string, automatic = false) => {
     if (typeof id !== "string" || typeof automatic !== "boolean") throw new Error("invalid task request");
     const host = getHost();
     if (!host) throw new Error("host unavailable");
+    if (OMP_ONLY) return executeScheduledTaskInOmp(host, id, automatic);
     return executeScheduledTask({
       host, id, automatic, runs: scheduledRunsBySession,
       isCurrent: () => !isQuitting() && getHost() === host,
@@ -73,6 +134,7 @@ export function registerScheduledIpc({
   });
   handle(IPC.invoke.scheduledRun, async (host: HostProcess | null, id: string) => {
     if (!host) throw new Error("host unavailable");
+    if (OMP_ONLY) return executeScheduledTaskInOmp(host, id, false);
     const result = await host.call<{
       sessionId: string;
       prompt: string;

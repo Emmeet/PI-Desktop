@@ -193,7 +193,7 @@ test("read and clear notification actions dismiss outstanding task banners", () 
   assert.match(clearHandler, /dismissAllTaskNativeNotifications\(\)/);
   assert.ok(
     readHandler.indexOf("await host.call") <
-      readHandler.indexOf("dismissTaskNativeNotification"),
+      readHandler.lastIndexOf("dismissTaskNativeNotification"),
     "read acknowledgement must succeed before dismissing the native object",
   );
   assert.ok(

@@ -92,9 +92,8 @@ export function ScheduledEditor({
     );
     setIntervalUnit(unit);
   };
-  const defaultModel = !task && settings?.defaultProviderId && settings.defaultModelId
-    ? { providerId: settings.defaultProviderId, modelId: settings.defaultModelId }
-    : {};
+  // omp: an unset model runs the task with omp's `default` role.
+  const defaultModel = {};
   const [modelSelection, setModelSelection] = useState<ScheduledModelSelection>(
     task?.providerId && task.modelId
       ? { providerId: task.providerId, modelId: task.modelId, thinkingLevel: task.thinkingLevel }

@@ -112,16 +112,9 @@ test("Composer owns the mode and model controls", () => {
 
   assert.ok(modeControl >= 0);
   assert.ok(permissionControl > modeControl);
-  // The task draft has no session, so its picker must not claim one: with
-  // `activeSessionId` unset the menu resolves the selected model's binding
-  // default thinking level instead of pinning the draft to its current value.
-  assert.match(scheduledModelPickerSource, /activeSessionId: null/);
-  assert.doesNotMatch(scheduledModelPickerSource, /useId\(/);
-  assert.match(scheduledModelPickerSource, /composerModelDisplayName\(provider, value\.modelId \?\? ""\)/);
-  assert.doesNotMatch(
-    scheduledModelPickerSource,
-    /composerModelDisplayName\(provider, value\.modelId \?\? "", selected\.displayName\)/,
-  );
+  // Scheduled tasks pick from omp's model list and roles, like the composer.
+  assert.match(scheduledModelPickerSource, /useOmpModelChoices\(\)/);
+  assert.match(scheduledModelPickerSource, /OMP_ROLE_PROVIDER = "omp-role"/);
   assert.doesNotMatch(leftToolbar, /composer-thinking|thinking-chip/);
   assert.doesNotMatch(topbarSource, /ModelSelect|model-chip/);
   assert.doesNotMatch(topbarSource, /ct-mode|ct-mode-btn|configureActiveSession/);

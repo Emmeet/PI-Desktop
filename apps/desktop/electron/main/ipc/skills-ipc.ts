@@ -24,6 +24,11 @@ export type SkillsIpcDependencies = {
   disabledBuiltinSubagents: () => Promise<string[]>;
   stripWinLongPrefix: (path: string) => string;
   sendToRenderer: (channel: string, payload?: unknown) => void;
+  /** omp's real agents: the Subagents page lists these instead of the app presets. */
+  ompAgents?: {
+    catalog: (projectPath: string | null) => Promise<Array<Record<string, unknown> & { name: string; enabled: boolean }>>;
+    setEnabled: (name: string, enabled: boolean) => Promise<void>;
+  };
   searchSkillMarket: (query: string, sources: { id: string; name: string; url: string }[]) => Promise<SkillMarketSearchResult>;
   fetchSkillMarketDocument: (entry: { id: string; name: string; url: string }) => Promise<SkillMarketDocument>;
   logger: Pick<Logger, "app">;
@@ -41,6 +46,7 @@ export function registerSkillsIpc({
   searchSkillMarket,
   fetchSkillMarketDocument,
   logger,
+  ompAgents,
 }: SkillsIpcDependencies): void {
   /*
     The market's two channels are the only place that knows why a source went
@@ -316,6 +322,10 @@ export function registerSkillsIpc({
    */
   handle(IPC.invoke.subagentCatalog, async () => {
     const projectPath = (await optionalWorkspaceRoot()) ?? undefined;
+    if (ompAgents) {
+      const builtins = await ompAgents.catalog(projectPath ?? null);
+      return { subagents: builtins.filter((row) => row.enabled), builtins, diagnostics: [], projectPath: projectPath ?? null };
+    }
     const disabled = await disabledBuiltinSubagents();
     const { definitions, builtins, diagnostics } = await loadSubagentDefinitions(
       projectPath,
@@ -384,6 +394,11 @@ export function registerSkillsIpc({
   handle(
     IPC.invoke.subagentSetBuiltinEnabled,
     async (payload: { id: string; enabled: boolean }) => {
+      if (ompAgents) {
+        await ompAgents.setEnabled(payload.id, payload.enabled);
+        sendToRenderer(IPC.event.pluginChanged, { reason: "subagent" });
+        return { ok: true };
+      }
       if (!host) throw new Error("host unavailable");
       const res = await host.call("agents.setBuiltinEnabled", payload);
       sendToRenderer(IPC.event.pluginChanged, { reason: "subagent" });
