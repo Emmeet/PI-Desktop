@@ -550,6 +550,7 @@ export const tr = {
     searchModels: "Model ara",
     ompRole: "Rol",
     ompFast: "Hızlı",
+    ompFastMode: "Hızlı mod",
     ompFastOn: "Hızlı mod açık: omp öncelikli işleme ister (daha hızlı, daha pahalı olabilir)",
     ompFastOff: "Hızlı mod kapalı",
     ompFastUnsupported: "Geçerli modelde omp hızlı modu yok",

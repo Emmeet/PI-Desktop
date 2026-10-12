@@ -75,6 +75,17 @@ export function OmpModelPicker({
   }, []);
   useEffect(() => { refresh(false); }, [refresh]);
   useEffect(() => { if (open) refresh(false); }, [open, refresh]);
+  const currentSessionId = session?.id;
+  useEffect(() => {
+    // A new chat starts from omp's `default` role, not from the previous chat's pick.
+    setDraftModel(null);
+    setDraftThinking(null);
+    if (!currentSessionId) {
+      api.ompListModels(false)
+        .then((fresh) => setCatalog((current) => (current ? { ...current, selected: fresh.selected, thinkingLevel: fresh.thinkingLevel } : fresh)))
+        .catch(() => undefined);
+    }
+  }, [currentSessionId]);
   useEffect(() => {
     // The role switcher applies a role's model; mirror it here.
     const onRoleModel = (event: Event) => {
@@ -158,22 +169,9 @@ export function OmpModelPicker({
 
   return (
     <>
-    {selectedInfo ? (
-      <TooltipButton
-        type="button"
-        className={`icon-btn composer-model-thinking-chip omp-fast-toggle ${fast && fastSupported ? "active is-on" : ""}`}
-        tooltip={fastTooltip}
-        ariaLabel={fastTooltip}
-        aria-pressed={fast && fastSupported}
-        data-omp-fast-toggle={fast && fastSupported ? "on" : "off"}
-        disabled={controlsBlocked || fastBusy || !fastSupported}
-        onClick={() => void toggleFast()}
-      >
-        <span className="composer-model-thinking-icon" aria-hidden="true"><IconBolt size={14} /></span>
-        <span className="composer-model-thinking-model">{t("chat.ompFast")}</span>
-      </TooltipButton>
-    ) : null}
-    {levels.length > 0 && shownLevel ? (
+    {fastSupported || (levels.length > 0 && shownLevel) ? (
+    <>
+    {(levels.length > 0 && shownLevel) || fastSupported ? (
       <AnchoredMenu
         className="composer-model-thinking"
         open={levelOpen}
@@ -188,8 +186,8 @@ export function OmpModelPicker({
             ref={ref}
             type="button"
             className={`icon-btn composer-model-thinking-chip ${levelOpen ? "active" : ""}`}
-            tooltip={`${t("chat.reasoningLevel")}: ${shownLevel}`}
-            ariaLabel={`${t("chat.reasoningLevel")}: ${shownLevel}`}
+            tooltip={shownLevel ? `${t("chat.reasoningLevel")}: ${shownLevel}` : t("chat.ompFastMode")}
+            ariaLabel={shownLevel ? `${t("chat.reasoningLevel")}: ${shownLevel}` : t("chat.ompFastMode")}
             aria-haspopup="menu"
             aria-expanded={levelOpen}
             data-omp-thinking-picker="true"
@@ -197,13 +195,13 @@ export function OmpModelPicker({
             onClick={() => { onCloseOtherMenus(); setOpen(false); setLevelOpen((v) => !v); }}
           >
             <span className="composer-model-thinking-icon" aria-hidden="true"><IconSparkles size={14} /></span>
-            <span className="composer-model-thinking-model">{shownLevel}</span>
+            <span className="composer-model-thinking-model">{shownLevel ?? t("chat.ompFastMode")}</span>
             <IconChevronDown size={12} aria-hidden="true" className="composer-model-thinking-chevron" />
           </TooltipButton>
         )}
       >
         <div className="composer-menu-root" data-omp-thinking-list="true">
-          {levels.map((level) => (
+          {levels.map((level: string) => (
             <button
               key={level}
               type="button"
@@ -217,8 +215,29 @@ export function OmpModelPicker({
               {level === shownLevel ? <IconCheck size={14} className="composer-model-check" aria-hidden="true" /> : null}
             </button>
           ))}
+          {fastSupported ? (
+            <>
+              {levels.length > 0 ? <div className="omp-menu-separator" role="separator" /> : null}
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={fast}
+                title={fastTooltip}
+                data-omp-fast-toggle={fast ? "on" : "off"}
+                disabled={fastBusy}
+                className={`composer-plus-item composer-model-option omp-fast-row ${fast ? "is-on" : ""}`}
+                onClick={() => void toggleFast()}
+              >
+                <IconBolt size={13} aria-hidden="true" className="omp-fast-row-icon" fill={fast ? "currentColor" : "none"} />
+                <span className="composer-model-label">{t("chat.ompFastMode")}</span>
+                <span className={`omp-switch ${fast ? "is-on" : ""}`} aria-hidden="true"><span /></span>
+              </button>
+            </>
+          ) : null}
         </div>
       </AnchoredMenu>
+    ) : null}
+    </>
     ) : null}
     <AnchoredMenu
       className="composer-model-thinking"

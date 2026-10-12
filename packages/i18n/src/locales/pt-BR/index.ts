@@ -540,6 +540,7 @@ export const ptBR = {
     searchModels: "Pesquisar modelos…",
     ompRole: "Função",
     ompFast: "Rápido",
+    ompFastMode: "Modo rápido",
     ompFastOn: "Modo rápido ativado: o omp pede processamento prioritário (mais rápido, pode custar mais)",
     ompFastOff: "Modo rápido desativado",
     ompFastUnsupported: "O modelo atual não tem modo rápido no omp",

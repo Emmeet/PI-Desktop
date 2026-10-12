@@ -57,10 +57,14 @@ export function OmpRolePicker({
   useEffect(() => { refresh(false); }, [refresh]);
   useEffect(() => { if (open) refresh(true); }, [open, refresh]);
 
+  const roleSessionId = session?.id;
+  useEffect(() => { setCurrent(null); }, [roleSessionId]);
   const sessionModel = session?.providerId && session?.modelId ? `${session.providerId}/${session.modelId}` : null;
   const base = (r: OmpRole) => (r.model ? splitRoleModel(r.model).model : null);
   const matched = roles?.find((r) => r.id === current && r.model && (!sessionModel || base(r) === sessionModel))
-    ?? (sessionModel ? roles?.find((r) => base(r) === sessionModel) : undefined);
+    ?? (sessionModel ? roles?.find((r) => base(r) === sessionModel) : undefined)
+    // An empty new chat starts on omp's `default` role.
+    ?? (!session && !current ? roles?.find((r) => r.id === "default" && r.model) : undefined);
   const label = matched ? matched.id : t("chat.ompRole");
 
   const apply = async (role: OmpRole) => {

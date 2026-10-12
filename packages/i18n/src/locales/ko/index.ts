@@ -550,6 +550,7 @@ export const ko = {
     searchModels: "모델 검색",
     ompRole: "역할",
     ompFast: "빠름",
+    ompFastMode: "빠른 모드",
     ompFastOn: "빠른 모드 켜짐: omp가 우선 처리를 요청합니다 (더 빠르지만 비용이 늘 수 있음)",
     ompFastOff: "빠른 모드 꺼짐",
     ompFastUnsupported: "현재 모델은 omp 빠른 모드를 지원하지 않습니다",

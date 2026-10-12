@@ -11,6 +11,7 @@ import type {
   UiMessage,
 } from "@pi-desktop/shared";
 import { NATIVE_PI_SESSION_PREFIX } from "../native-pi-session-id.js";
+import { listOmpRoles } from "./roles.js";
 import { resolveOmpBinary } from "./binary.js";
 import {
   envModelOverride,
@@ -412,14 +413,34 @@ export class OmpSessionService {
     try { writeOmpPreferences(this.prefsCache); } catch { /* preference is best effort */ }
   }
 
-  /** Model a brand-new chat starts with: remembered choice, then env, then omp's default. */
-  newSessionModel(): OmpModelRef | undefined {
-    const saved = this.prefs().model;
-    if (saved) {
-      const suffix = /:(off|minimal|low|medium|high|xhigh|max)$/.exec(saved.modelId);
-      return suffix ? { provider: saved.provider, modelId: saved.modelId.slice(0, suffix.index) } : saved;
+  /** omp's `default` role (modelRoles.default), cached; new chats start with it. */
+  private defaultRole?: { model: OmpModelRef; thinking?: string } | null;
+  /** A model / level picked in the new-chat composer before the chat exists. */
+  private pendingNew?: { model?: OmpModelRef; thinking?: string };
+
+  async refreshDefaultRole(): Promise<void> {
+    try {
+      const role = (await listOmpRoles()).find((entry) => entry.id === "default");
+      const value = role?.model ?? null;
+      if (!value) { this.defaultRole = null; return; }
+      const suffix = /:(off|minimal|low|medium|high|xhigh|max)$/.exec(value);
+      const ref = suffix ? value.slice(0, suffix.index) : value;
+      const slash = ref.indexOf("/");
+      this.defaultRole = slash > 0
+        ? { model: { provider: ref.slice(0, slash), modelId: ref.slice(slash + 1) }, ...(suffix ? { thinking: suffix[1] === "max" ? "xhigh" : suffix[1] } : {}) }
+        : null;
+    } catch {
+      /* keep the last known default */
     }
-    return envModelOverride();
+  }
+
+  /** Model a brand-new chat starts with: a draft pick, then omp's `default` role, then env, then omp's own default. */
+  newSessionModel(): OmpModelRef | undefined {
+    return this.pendingNew?.model ?? this.defaultRole?.model ?? envModelOverride();
+  }
+
+  newSessionThinking(): string | undefined {
+    return this.pendingNew?.thinking ?? this.defaultRole?.thinking ?? (this.defaultRole ? undefined : this.prefs().thinkingLevel);
   }
 
   private modelFields(record: SessionRecord, file: OmpSessionFile | undefined): { providerId?: string; modelId?: string } {
@@ -535,11 +556,12 @@ export class OmpSessionService {
       promise.catch(() => { if (this.catalog?.promise === promise) this.catalog = undefined; });
     }
     const { models, defaultModel } = await this.catalog!.promise;
+    await this.refreshDefaultRole();
     return {
       models,
       defaultModel,
       selected: this.newSessionModel() ?? defaultModel,
-      thinkingLevel: this.prefs().thinkingLevel ?? null,
+      thinkingLevel: this.newSessionThinking() ?? null,
       thinkingLevels: OMP_THINKING_LEVELS,
     };
   }
@@ -587,7 +609,7 @@ export class OmpSessionService {
     const suffix = /:(off|minimal|low|medium|high|xhigh|max)$/.exec(input.modelId);
     const model = { provider: input.provider, modelId: suffix ? input.modelId.slice(0, suffix.index) : input.modelId };
     this.savePrefs({ model });
-    if (!input.sessionId) return null;
+    if (!input.sessionId) { this.pendingNew = { ...this.pendingNew, model }; return null; }
     const record = this.record(input.sessionId);
     const runtime = this.runtimes.get(record.id);
     if (runtime?.alive) await runtime.setModel(model);
@@ -626,7 +648,7 @@ export class OmpSessionService {
       throw Object.assign(new Error(`Unsupported thinking level: ${input.level}`), { errorCode: "INVALID_ARGUMENT" });
     }
     this.savePrefs({ thinkingLevel: input.level });
-    if (!input.sessionId) return null;
+    if (!input.sessionId) { this.pendingNew = { ...this.pendingNew, thinking: input.level }; return null; }
     const record = this.record(input.sessionId);
     const runtime = this.runtimes.get(record.id);
     if (runtime?.alive) await runtime.setThinkingLevel(input.level);
@@ -645,6 +667,10 @@ export class OmpSessionService {
     }
     const id = `${NATIVE_PI_SESSION_PREFIX}new-${randomUUID()}`;
     const record: SessionRecord = { id, cwd, createdAt: new Date().toISOString(), title: input.title?.trim() || undefined };
+    // A pick made in the empty composer belongs to this chat only; otherwise omp's `default` role applies.
+    if (this.pendingNew?.model) record.model = this.pendingNew.model;
+    if (this.pendingNew?.thinking) record.thinkingLevel = this.pendingNew.thinking;
+    this.pendingNew = undefined;
     this.records.set(id, record);
     return this.summary(record, undefined);
   }
@@ -662,7 +688,7 @@ export class OmpSessionService {
       ...(record.cwd && existsSync(record.cwd) ? { projectPath: record.cwd } : {}),
       ...this.modelFields(record, file),
       mode: "agent",
-      thinkingLevel: (record.thinkingLevel ?? file?.thinkingLevel ?? (file ? undefined : this.prefs().thinkingLevel) ?? "off") as SessionSummary["thinkingLevel"],
+      thinkingLevel: (record.thinkingLevel ?? file?.thinkingLevel ?? (file ? undefined : this.newSessionThinking()) ?? "off") as SessionSummary["thinkingLevel"],
       permissionMode: "inherit",
       source: "pi-native",
       nativeHarness: "omp",
@@ -818,13 +844,14 @@ export class OmpSessionService {
     const pending = this.opening.get(id);
     if (pending) return pending;
     const record = this.record(id);
+    if (!(record.path && existsSync(record.path)) && !record.model) await this.refreshDefaultRole();
     const opening = OmpSessionRuntime.start({
       id,
       cwd: record.cwd,
       sessionPath: record.path && existsSync(record.path) ? record.path : undefined,
       // An explicit choice wins; a fresh chat falls back to the remembered model.
       model: record.model ?? (record.path && existsSync(record.path) ? undefined : this.newSessionModel()),
-      thinkingLevel: record.thinkingLevel ?? (record.path && existsSync(record.path) ? undefined : this.prefs().thinkingLevel),
+      thinkingLevel: record.thinkingLevel ?? (record.path && existsSync(record.path) ? undefined : this.newSessionThinking()),
       agentDir: this.agentDir,
       notify,
       onSessionFile: (path) => {

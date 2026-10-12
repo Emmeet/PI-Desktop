@@ -546,6 +546,7 @@ export const zhTW = {
     searchModels: "搜尋模型",
     ompRole: "角色",
     ompFast: "快速",
+    ompFastMode: "快速模式",
     ompFastOn: "快速模式已開啟：omp 向服務商請求優先處理（更快，費用可能更高）",
     ompFastOff: "快速模式已關閉",
     ompFastUnsupported: "omp 中目前模型不支援快速模式",

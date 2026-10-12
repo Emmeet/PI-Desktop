@@ -465,7 +465,10 @@ async function handle(method: string, params: any): Promise<unknown> {
     }
     case "omp.roles.set": {
       const model = typeof params.model === "string" && params.model.trim() ? params.model.trim() : null;
-      return { roles: await (await loadOmp()).setOmpRole(String(params.role ?? ""), model) };
+      const omp = await loadOmp();
+      const roles = await omp.setOmpRole(String(params.role ?? ""), model);
+      await omp.ompSessionService().refreshDefaultRole();
+      return { roles };
     }
     case "omp.thinking.set": {
       const session = await (await loadOmp()).ompSessionService().setThinkingLevel({

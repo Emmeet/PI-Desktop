@@ -54,6 +54,10 @@ describe("omp binary resolution", () => {
 
 // A tiny stand-in for `omp --mode rpc` that speaks the same JSONL frames.
 const FAKE_OMP = `#!/usr/bin/env node
+if (process.argv[2] === "config") {
+  process.stdout.write(JSON.stringify({ key: "modelRoles", value: process.env.FAKE_OMP_ROLES ? JSON.parse(process.env.FAKE_OMP_ROLES) : {} }));
+  process.exit(0);
+}
 const fs = require("node:fs");
 const path = require("node:path");
 const dir = process.env.FAKE_OMP_SESSIONS;
@@ -174,8 +178,16 @@ describe("omp model selection", () => {
     expect(calls).toEqual(expect.arrayContaining([expect.objectContaining({ cmd: "set_model", provider: "p1", modelId: "m2" })]));
     expect(service.detail(created.id)).toMatchObject({ providerId: "p1", modelId: "m2", thinkingLevel: "high" });
 
+    // New chats ignore the last pick and start on omp's `default` role (model + level).
+    process.env.FAKE_OMP_ROLES = JSON.stringify({ default: "p1/m1:low" });
     const again = new OmpSessionService({ agentDir: join(root, "agent"), sessionRoot });
-    expect(again.newSessionModel()).toEqual({ provider: "p1", modelId: "m2" });
+    await again.refreshDefaultRole();
+    expect(again.newSessionModel()).toEqual({ provider: "p1", modelId: "m1" });
+    expect(again.newSessionThinking()).toBe("low");
+    await again.setModel({ provider: "p1", modelId: "m2" });
+    expect(again.detail(again.create({ projectPath: root }).id)).toMatchObject({ providerId: "p1", modelId: "m2" });
+    expect(again.newSessionModel()).toEqual({ provider: "p1", modelId: "m1" });
+    delete process.env.FAKE_OMP_ROLES;
     service.disposeAll();
   });
 });

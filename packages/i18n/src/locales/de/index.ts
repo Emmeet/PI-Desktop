@@ -541,6 +541,7 @@ export const de = {
     "searchModels": "Modelle suchen",
     "ompRole": "Rolle",
     "ompFast": "Schnell",
+    "ompFastMode": "Schnellmodus",
     "ompFastOn": "Schnellmodus an: omp fordert priorisierte Verarbeitung an (schneller, evtl. teurer)",
     "ompFastOff": "Schnellmodus aus",
     "ompFastUnsupported": "Das aktuelle Modell hat in omp keinen Schnellmodus",

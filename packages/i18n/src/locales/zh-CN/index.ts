@@ -546,6 +546,7 @@ export const zhCN = {
     searchModels: "搜索模型",
     ompRole: "角色",
     ompFast: "快速",
+    ompFastMode: "快速模式",
     ompFastOn: "快速模式已开启：omp 向服务商请求优先处理（更快，费用可能更高）",
     ompFastOff: "快速模式已关闭",
     ompFastUnsupported: "omp 中当前模型不支持快速模式",

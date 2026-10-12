@@ -553,6 +553,7 @@ export const en = {
     searchModels: "Search models",
     ompRole: "Role",
     ompFast: "Fast",
+    ompFastMode: "Fast mode",
     ompFastOn: "Fast mode on: omp asks the provider for priority serving (faster, may cost more)",
     ompFastOff: "Fast mode off",
     ompFastUnsupported: "The current model has no fast mode in omp",

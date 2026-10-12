@@ -147,7 +147,7 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  color: var(--ds-accent);
+  color: var(--ds-warning);
 }
 
 .composer-model-thinking-model,
@@ -164,7 +164,7 @@
 
 .composer-model-thinking-level {
   max-width: 88px;
-  color: var(--ds-accent);
+  color: var(--ds-warning);
   font-size: var(--text-sm);
 }
 
@@ -445,7 +445,7 @@
 }
 
 .composer-thinking-tick.active {
-  color: var(--ds-accent);
+  color: var(--ds-warning);
   font-weight: var(--font-weight-strong);
 }
 
@@ -786,12 +786,59 @@
   padding: 6px;
 }
 
-/* omp fast mode toggle: on reads as a filled chip, unsupported as dimmed. */
-.omp-fast-toggle.is-on {
-  background: var(--ds-tile-deep);
-  color: var(--ds-text-primary);
+/* omp fast-mode row inside the reasoning-level menu. */
+.omp-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--ds-elevation-stroke);
 }
 
-.omp-fast-toggle:disabled {
-  opacity: 0.45;
+.composer-model-menu .omp-fast-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.omp-fast-row .composer-model-label {
+  flex: 1;
+  text-align: left;
+}
+
+.omp-fast-row-icon {
+  color: var(--ds-text-faint);
+}
+
+.omp-fast-row.is-on .omp-fast-row-icon {
+  color: var(--ds-warning);
+}
+
+.omp-switch {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  background: var(--ds-tile-deep);
+  transition: background var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+.omp-switch > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: var(--radius-full);
+  background: var(--ds-text-faint);
+  transition: transform var(--motion-duration-normal) var(--motion-ease-out);
+}
+
+.omp-switch.is-on {
+  background: var(--ds-warning);
+}
+
+.omp-switch.is-on > span {
+  transform: translateX(11px);
+  background: var(--ds-bg-elevated-opaque);
 }
