@@ -29,18 +29,17 @@ test("native dispatch and events carry durable user acknowledgement", () => {
   assert.match(events, /reconcilePersistedUserMessage/);
 });
 
-test("native compact and session-addressed queue endpoints reject before host or queue access", () => {
+test("native compact and session-addressed queue endpoints route to omp before host or queue access", () => {
   for (const operation of ["agentCompact", "agentQueuePush", "agentQueueList"]) {
     const start = agent.indexOf(`handle(IPC.invoke.${operation},`);
     const body = agent.slice(start, agent.indexOf("\n  handle(", start + 1));
-    assert.match(body, /rejectNativeAgentOperation\(req\.sessionId\)/, operation);
-    const guard = body.indexOf("rejectNativeAgentOperation");
+    const guard = body.indexOf("native-pi:");
+    assert.ok(guard >= 0, operation);
     for (const access of ["host.call", "agentHostBridge.", "resolveAgentRuntimeLaunch("]) {
       const at = body.indexOf(access);
       assert.ok(at < 0 || guard < at, `${operation} guards ${access}`);
     }
   }
-  assert.match(agent, /errorCode: "NATIVE_PI_UNSUPPORTED"/);
 });
 
 // Real slices/IPC with synthetic state; no Electron process or native home.
@@ -54,17 +53,21 @@ const { createTranscriptSlice } = await import("../src/stores/slices/transcript-
 const { api } = await import("../src/lib/api.ts");
 const { mergeLiveSessionMessages, reconcilePersistedUserMessage } = await import("../src/lib/session-transcript.ts");
 
-test("unsupported native agent IPC never reaches host or queue", async () => {
+test("native compact and queue IPC reach the omp sidecar, never the host or queue", async () => {
   const handlers = new Map();
   const forbidden = () => assert.fail("native operation reached Desktop backend");
   const backend = new Proxy({}, { get: () => forbidden });
+  const methods = [];
+  const sidecar = { call: async (method) => { methods.push(method); return method === "omp.queue.list" ? { entries: [] } : { entry: { id: "q" } }; } };
   registerAgentIpc({
     registrar: { handle: (channel, handler) => handlers.set(channel, handler) },
-    getHost: () => backend, getSidecar: () => backend, getAgentHostBridge: () => backend,
+    getHost: () => backend, getSidecar: () => sidecar, getAgentHostBridge: () => backend,
   });
   for (const operation of ["agentCompact", "agentQueuePush", "agentQueueList"]) {
-    await assert.rejects(handlers.get(IPC.invoke[operation])({ sessionId: "native-pi:fixture", content: "unused", itemId: "unused" }), { errorCode: "NATIVE_PI_UNSUPPORTED" });
+    await handlers.get(IPC.invoke[operation])({ sessionId: "native-pi:fixture", content: "unused", itemId: "unused" }).catch(() => undefined);
   }
+  assert.ok(methods.includes("omp.compact"), methods.join());
+  assert.ok(methods.includes("omp.queue.list"), methods.join());
 });
 
 const user = (id) => ({ id, role: "user", content: "identical prompt", createdAt: "2026-09-14T00:00:00Z", status: "complete" });
@@ -415,14 +418,9 @@ test("a generic Desktop completion never touches parallel delegate streams", asy
 
 const queueSlice = await read("../src/stores/slices/queue-slice.ts");
 
-test("a running native side-chat send fails before the Desktop queue", () => {
-  const guard = queueSlice.slice(
-    queueSlice.indexOf("?.source ==="),
-    queueSlice.indexOf("const accepted = await get().enqueuePrompt"),
-  );
-  assert.match(guard, /"pi-native"/);
-  assert.match(guard, /showToast\(i18n\.t\("chat\.nativeSessionBusy"\)/);
-  assert.match(guard, /return false/);
+test("a running native send queues an omp follow-up instead of failing", () => {
+  assert.doesNotMatch(queueSlice, /showToast\(i18n\.t\("chat\.nativeSessionBusy"\)/);
+  assert.match(queueSlice, /!sessionId\.startsWith\("native-pi:"\)/);
 });
 
 test("the native busy message is localized in every locale", async () => {

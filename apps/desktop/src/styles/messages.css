@@ -3484,3 +3484,35 @@
     opacity: 0.7;
   }
 }
+
+/* omp: manual compaction from the context popover. */
+.context-inspector-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.context-inspector-compact-btn {
+  border: 1px solid var(--ds-border, rgba(127, 127, 127, 0.3));
+  border-radius: var(--radius-md);
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  color: var(--ds-text-primary);
+  background: transparent;
+  cursor: pointer;
+}
+
+.context-inspector-compact-btn:hover:not(:disabled) {
+  background: var(--ds-bg-hover, rgba(127, 127, 127, 0.12));
+}
+
+.context-inspector-compact-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.todo-dock-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 6px;
+}

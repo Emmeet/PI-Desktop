@@ -39,7 +39,7 @@ import {
   catalogModelConfigFor,
 } from "./models-dev-catalog";
 import { VendorOAuth } from "./oauth";
-import { AppUpdaterController } from "./updater";
+import { AppUpdaterController, UPDATES_ENABLED } from "./updater";
 import {
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
@@ -241,7 +241,8 @@ const updater = new AppUpdaterController({
   logger,
   send: sendToRenderer,
   currentVersion: APP_VERSION,
-  isPackaged: !isDevelopmentBuild,
+  // Off until the fork publishes releases; see UPDATES_ENABLED.
+  isPackaged: !isDevelopmentBuild && UPDATES_ENABLED,
   getLocale: () => mainState.updaterLocale,
   readUpdateSettings: async () => {
     const host = getHost();

@@ -170,6 +170,8 @@ export type ToolPermissionRequest = {
 export type ToolPermissionResolution = {
   requestId: string;
   decision: PermissionDecision;
+  /** Routes omp (native) approvals to the chat's omp process. */
+  sessionId?: string;
 };
 
 /** A selectable asktool answer: a plain label or a label with supporting copy. */

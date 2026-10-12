@@ -55,6 +55,14 @@ export function ContextUsageInspector({
   const panelId = useId();
   // The transcript shows one row per compaction; the inspector adds what those
   // rows cannot — how much of the model context the newest summary occupies.
+  const compactContext = useAppStore((state) => state.compactContext);
+  // Manual compaction is offered for omp chats that have history and are idle.
+  const canCompact = useAppStore((state) =>
+    Boolean(state.activeSessionId?.startsWith("native-pi:") && state.messages.length > 0),
+  );
+  const compactBusy = useAppStore((state) =>
+    Boolean(state.activeSessionId && state.runningSessions[state.activeSessionId]),
+  );
   const compaction = useAppStore((state) =>
     state.activeSessionId
       ? state.sessionCompactions[state.activeSessionId]?.at(-1)
@@ -411,6 +419,21 @@ export function ContextUsageInspector({
           </span>
         </div>
       </div>
+      {canCompact ? (
+        <div className="context-inspector-actions">
+          <button
+            type="button"
+            className="context-inspector-compact-btn"
+            disabled={compactBusy}
+            onClick={() => {
+              setOpen(false);
+              void compactContext();
+            }}
+          >
+            {t("chat.compactNow")}
+          </button>
+        </div>
+      ) : null}
       {compaction ? (
         <div className="context-inspector-compaction">
           <span>

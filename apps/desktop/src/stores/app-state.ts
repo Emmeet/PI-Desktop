@@ -353,7 +353,7 @@ export type AppState = {
   resolvePermission: (
     sessionId: string,
     requestId: string,
-    decision: "allow-once" | "allow-session" | "deny",
+    decision: "allow-once" | "allow-session" | "allow-always" | "deny",
   ) => Promise<void>;
   resolveAsk: (
     sessionId: string,

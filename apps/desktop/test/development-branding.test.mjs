@@ -51,9 +51,9 @@ test("Windows runtime registers the canonical native application identity", () =
   );
 });
 
-test("Windows packages pin PI-Desktop executable and shortcut names", () => {
-  assert.equal(packageJson.build.win.executableName, "PI-Desktop");
-  assert.equal(packageJson.build.nsis.shortcutName, "PI-Desktop");
+test("Windows packages pin OMP Desktop executable and shortcut names", () => {
+  assert.equal(packageJson.build.win.executableName, "OMP-Desktop");
+  assert.equal(packageJson.build.nsis.shortcutName, "OMP Desktop");
 });
 
 test("Windows packages and windows use the canonical PI-Desktop icon", () => {

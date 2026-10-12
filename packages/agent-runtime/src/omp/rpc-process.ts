@@ -3,6 +3,11 @@ import { dirname } from "node:path";
 
 export type OmpFrame = Record<string, any> & { type: string };
 
+/** Quote one argument for cmd.exe when an omp .cmd shim has to run through a shell. */
+function winQuote(arg: string): string {
+  return /^[\w@%+=:,./\\-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '""')}"`;
+}
+
 type Pending = { resolve: (data: any) => void; reject: (error: Error) => void };
 
 /**
@@ -21,16 +26,22 @@ export class OmpRpcProcess {
   private exited = false;
   readonly ready: Promise<void>;
 
-  constructor(binary: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv }) {
+  constructor(binary: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv; mode?: "rpc" | "rpc-ui" }) {
     // Make sure a Bun-installed omp can find `bun` even under a minimal GUI PATH.
     const env = { ...(options.env ?? process.env) };
     const sep = process.platform === "win32" ? ";" : ":";
     env.PATH = [dirname(binary), env.PATH ?? ""].filter(Boolean).join(sep);
-    this.child = spawn(binary, ["--mode", "rpc", ...args], {
+    // `rpc-ui` gives omp an interactive UI over the same JSONL channel, which
+    // is what tool approvals and the ask tool need (extension_ui_request).
+    const command = [binary, ["--mode", options.mode ?? "rpc", ...args]] as const;
+    // npm/bun shims on Windows are .cmd files, which spawn cannot exec directly.
+    const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(binary);
+    this.child = spawn(shim ? `"${binary}"` : command[0], shim ? command[1].map(winQuote) : [...command[1]], {
       cwd: options.cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      ...(shim ? { shell: true } : {}),
     });
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.setEncoding("utf8");

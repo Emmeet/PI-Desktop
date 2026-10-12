@@ -5,6 +5,7 @@ import { Button } from "./ui";
 import { IconCheck, IconChevronDown, IconChevronUp } from "./icons";
 import { useSessionTodosRecovery } from "../features/chat/todos/useSessionTodosRecovery";
 import { useAppStore } from "../stores/app-store";
+import { api } from "../lib/api";
 
 function statusSymbol(status: TodoStatus): string {
   switch (status) {
@@ -21,6 +22,8 @@ export function TodoDock({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation();
   const snapshot = useAppStore((state) => state.sessionTodos[sessionId]);
   const [expanded, setExpanded] = useState(false);
+  const applyTodosChanged = useAppStore((state) => state.applyTodosChanged);
+  const showToast = useAppStore((state) => state.showToast);
 
   useEffect(() => {
     setExpanded(false);
@@ -74,6 +77,22 @@ export function TodoDock({ sessionId }: { sessionId: string }) {
               <TodoRow key={`${index}:${todo.content}`} todo={todo} />
             ))}
           </div>
+          {sessionId.startsWith("native-pi:") ? (
+            <div className="todo-dock-actions">
+              <Button
+                type="button"
+                variant="ghost"
+                tabIndex={expanded ? 0 : -1}
+                onClick={() => {
+                  void api.ompTodosSet(sessionId, [])
+                    .then((next) => applyTodosChanged(next))
+                    .catch((error) => showToast(error instanceof Error ? error.message : String(error), { variant: "error" }));
+                }}
+              >
+                {t("chat.todo.clear")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

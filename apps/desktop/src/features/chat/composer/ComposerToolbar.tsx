@@ -12,11 +12,13 @@ import {
 } from "@pi-desktop/shared";
 import type { AppState } from "../../../stores/app-store";
 import { ComposerPermissionPicker } from "./ComposerPermissionPicker";
+import { OmpPlanToggle } from "./OmpPlanToggle";
 import { ContextUsageInspector } from "../../../components/ContextUsageInspector";
 import { ComposerControlSlots } from "./ComposerControlSlots";
 import { TooltipButton } from "../../../components/ui";
 import {
   IconArrowUp,
+  IconBolt,
   IconPlus,
   IconSparkles,
   IconStop,
@@ -67,7 +69,7 @@ export type ComposerToolbarProps = {
   runActive: boolean;
   hasDraftContent: boolean;
   abort: AppState["abort"];
-  submit: () => Promise<void>;
+  submit: (steering?: boolean) => Promise<void>;
   workSessionId?: string;
   workSessionLabel?: string;
 };
@@ -129,6 +131,7 @@ export function ComposerToolbar({
           </TooltipButton>
         </div>
         {omp ? null : <LiveVoiceControls t={t} workSessionId={workSessionId} />}
+        {omp ? <OmpPlanToggle session={omp.session} running={runActive} controlsBlocked={controlsBlocked} /> : null}
         {omp ? null : <>
         <TooltipButton
           type="button"
@@ -255,6 +258,18 @@ export function ComposerToolbar({
             onClick={undoComposerTransform}
           >
             <IconUndo2 size={15} aria-hidden="true" />
+          </TooltipButton>
+        ) : null}
+        {omp && runActive && hasDraftContent ? (
+          <TooltipButton
+            type="button"
+            className="icon-btn icon-btn-square composer-steer-btn"
+            tooltip={t("chat.steerNow", { shortcut: steeringShortcut })}
+            ariaLabel={t("chat.steerNow", { shortcut: steeringShortcut })}
+            disabled={sendBlocked}
+            onClick={() => void submit(true)}
+          >
+            <IconBolt size={15} aria-hidden="true" />
           </TooltipButton>
         ) : null}
         {runActive && !hasDraftContent ? (

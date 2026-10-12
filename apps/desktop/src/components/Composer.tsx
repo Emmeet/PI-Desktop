@@ -107,7 +107,9 @@ export function Composer({
   const refreshSessionsForOmp = useAppStore((s) => s.refreshSessions);
   const nativeReadOnly =
     nativeSession && activeSessionSummary.capabilities?.canPrompt !== true;
-  const nativeInputBlocked = nativeReadOnly || (nativeSession && isRunning);
+  // omp chats stay usable while a reply runs: Enter queues an omp follow-up
+  // and the steer action (Alt+Enter) interrupts with a message.
+  const nativeInputBlocked = nativeReadOnly;
   const workspacePath = useAppStore((s) => s.workspace?.path ?? "");
   const providers = useAppStore((s) => s.providers);
   const providerModels = useAppStore((s) => s.providerModels);

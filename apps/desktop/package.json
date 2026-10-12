@@ -4,7 +4,7 @@
   "desktopName": "pi-desktop.desktop",
   "private": true,
   "description": "OMP Desktop: Electron app for the oh-my-pi (omp) coding agent",
-  "homepage": "https://github.com/vastsa/PI-Desktop",
+  "homepage": "https://github.com/Emmeet/PI-Desktop",
   "author": {
     "name": "vastsa",
     "email": "hhxk666@gmail.com"
@@ -80,7 +80,7 @@
     "zustand": "^5.0.15"
   },
   "build": {
-    "appId": "net.aiuo.pi-desktop",
+    "appId": "io.github.emmeet.omp-desktop",
     "productName": "OMP Desktop",
     "directories": {
       "output": "release"
@@ -88,7 +88,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "vastsa",
+        "owner": "Emmeet",
         "repo": "PI-Desktop"
       }
     ],
@@ -142,7 +142,7 @@
       }
     ],
     "mac": {
-      "artifactName": "PI-Desktop-${version}-${arch}-mac.${ext}",
+      "artifactName": "OMP-Desktop-${version}-${arch}-mac.${ext}",
       "target": [
         {
           "target": "dmg"
@@ -177,7 +177,7 @@
       ]
     },
     "dmg": {
-      "artifactName": "PI-Desktop-${version}-${arch}.${ext}",
+      "artifactName": "OMP-Desktop-${version}-${arch}.${ext}",
       "background": "build/dmg-background.png",
       "icon": "build/icon.icns",
       "window": {
@@ -200,8 +200,8 @@
       ]
     },
     "win": {
-      "executableName": "PI-Desktop",
-      "artifactName": "PI-Desktop-Portable-${version}.${ext}",
+      "executableName": "OMP-Desktop",
+      "artifactName": "OMP-Desktop-Portable-${version}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -237,28 +237,29 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "PI-Desktop",
-      "artifactName": "PI-Desktop-Setup-${version}.${ext}"
+      "shortcutName": "OMP Desktop",
+      "artifactName": "OMP-Desktop-Setup-${version}.${ext}",
+      "uninstallDisplayName": "OMP Desktop"
     },
     "portable": {
-      "artifactName": "PI-Desktop-Portable-${version}.${ext}"
+      "artifactName": "OMP-Desktop-Portable-${version}.${ext}"
     },
     "deb": {
-      "packageName": "pi-desktop",
-      "artifactName": "pi-desktop_${version}_${arch}.${ext}"
+      "packageName": "omp-desktop",
+      "artifactName": "omp-desktop_${version}_${arch}.${ext}"
     },
     "rpm": {
-      "packageName": "pi-desktop",
-      "artifactName": "pi-desktop-${version}-${arch}.${ext}",
+      "packageName": "omp-desktop",
+      "artifactName": "omp-desktop-${version}-${arch}.${ext}",
       "fpm": [
         "--rpm-rpmbuild-define",
         "_build_id_links none"
       ]
     },
     "linux": {
-      "executableName": "pi-desktop",
+      "executableName": "omp-desktop",
       "syncDesktopName": true,
-      "artifactName": "PI-Desktop-${version}-linux-${arch}.${ext}",
+      "artifactName": "OMP-Desktop-${version}-linux-${arch}.${ext}",
       "target": [
         {
           "target": "AppImage"

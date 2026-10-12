@@ -842,3 +842,10 @@
   transform: translateX(11px);
   background: var(--ds-bg-elevated-opaque);
 }
+
+/* omp plan mode chip. */
+.omp-plan-chip.is-active {
+  color: var(--ds-accent, #4f8cff);
+  border-color: color-mix(in srgb, var(--ds-accent, #4f8cff) 45%, transparent);
+  background: color-mix(in srgb, var(--ds-accent, #4f8cff) 12%, transparent);
+}

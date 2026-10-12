@@ -3,8 +3,15 @@ import { existsSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync } 
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import type {
+  AgentActivity,
   AgentEvent,
   AgentEventEnvelope,
+  AskToolRequest,
+  ContextCompactionMark,
+  ContextCompactionReason,
+  QueuedTurnSummary,
+  SessionTodo,
+  ToolPermissionRequest,
   SessionDetail,
   SessionSearchPage,
   SessionSummary,
@@ -55,6 +62,59 @@ export function prepareOmpPrompt(content: string, attachments: OmpPromptAttachme
 }
 
 export type OmpNotifier = (envelope: AgentEventEnvelope) => void;
+/** Out-of-turn notifications (queue, todos, toasts) for the sidecar to forward. */
+export type OmpSideChannel = (method: string, params: unknown) => void;
+
+/** Appended to omp's system prompt while a chat is in desktop plan mode. */
+export const OMP_PLAN_MODE_PROMPT = [
+  "PLAN MODE is active. Do not modify files, run commands that change state, or make commits.",
+  "Investigate with read-only tools only, then write the plan as phases and tasks with the todo tool",
+  "and summarize it. Wait for the user to approve the plan before doing any of the work.",
+].join(" ");
+
+type OmpTodoPhase = { name?: string; tasks?: Array<{ content?: string; status?: string }> };
+
+/** omp todo phases → the desktop's flat todo list (phase names prefix their tasks). */
+export function ompPhasesToTodos(phases: unknown): SessionTodo[] {
+  if (!Array.isArray(phases)) return [];
+  const todos: SessionTodo[] = [];
+  const multi = phases.length > 1;
+  for (const phase of phases as OmpTodoPhase[]) {
+    for (const task of phase?.tasks ?? []) {
+      const content = String(task?.content ?? "").trim();
+      if (!content) continue;
+      const status = task?.status === "in_progress" || task?.status === "completed"
+        ? task.status
+        : task?.status === "abandoned"
+          ? "cancelled"
+          : "pending";
+      todos.push({ content: multi && phase?.name ? `${phase.name}: ${content}` : content, status, priority: "medium" });
+    }
+  }
+  return todos;
+}
+
+/** Stable queue entry id: the queue kind plus the message text. */
+export function ompQueueEntryId(queue: "steering" | "followUp", message: string): string {
+  return `ompq:${queue}:${Buffer.from(message, "utf8").toString("base64url")}`;
+}
+
+export function parseOmpQueueEntryId(id: string): { queue: "steering" | "followUp"; message: string } | undefined {
+  const match = /^ompq:(steering|followUp):(.*)$/.exec(id);
+  if (!match) return undefined;
+  return { queue: match[1] as "steering" | "followUp", message: Buffer.from(match[2]!, "base64url").toString("utf8") };
+}
+
+type PendingUi = {
+  method: "permission" | "select" | "confirm" | "input" | "ask";
+  questionIds?: string[];
+  options?: string[];
+  toolName?: string;
+  permission?: ToolPermissionRequest;
+  ask?: AskToolRequest;
+};
+
+const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "glob", "search", "lsp", "fetch", "web_search", "todo", "ask"]);
 
 /**
  * omp agent directory. `PI_DESKTOP_OMP_AGENT_DIR` overrides; otherwise omp's
@@ -146,10 +206,19 @@ class OmpSessionRuntime {
   onTurnSettled?: (optimisticUserId: string | undefined) => void;
   private currentAssistant?: UiMessage;
   private readonly toolArgs = new Map<string, unknown>();
+  private readonly openTools = new Map<string, string>();
+  private readonly pendingUi = new Map<string, PendingUi>();
+  private readonly sessionAllowed = new Set<string>();
+  private readonly pendingSteers: Array<{ text: string; optimisticId: string }> = [];
+  private queue: { steering: string[]; followUp: string[] } = { steering: [], followUp: [] };
+  private lastMessageId?: string;
+  private compactionReason?: ContextCompactionReason;
+  side: OmpSideChannel = () => undefined;
   sessionFile?: string;
 
   private constructor(
     readonly id: string,
+    readonly planMode: boolean,
     private readonly rpc: OmpRpcProcess,
     private notify: OmpNotifier,
     private readonly onSessionFile: (path: string) => void,
@@ -157,6 +226,8 @@ class OmpSessionRuntime {
   ) {
     rpc.onFrame((frame) => this.onFrame(frame));
     rpc.onExit((reason) => {
+      this.clearPendingUi();
+      if (this.queue.steering.length || this.queue.followUp.length) this.applyQueue({ steering: [], followUp: [] });
       if (this.turnId) {
         this.emit({ type: "error", error: { code: "OMP_PROCESS_EXITED", message: reason, retriable: true } });
         this.finish();
@@ -172,25 +243,33 @@ class OmpSessionRuntime {
     model?: OmpModelRef;
     thinkingLevel?: string;
     agentDir: string;
+    planMode?: boolean;
+    side?: OmpSideChannel;
     notify: OmpNotifier;
     onSessionFile: (path: string) => void;
     onExit: () => void;
   }): Promise<OmpSessionRuntime> {
     const binary = resolveOmpBinary();
     const args = ["--cwd", input.cwd];
+    // Plan mode: every non-read tool must ask, and the runtime denies those.
+    if (input.planMode) args.push("--approval-mode", "always-ask", "--append-system-prompt", OMP_PLAN_MODE_PROMPT);
     if (input.sessionPath) args.push("--resume", input.sessionPath);
     if (input.model) args.push("--model", `${input.model.provider}/${input.model.modelId}`);
     if (input.thinkingLevel) args.push("--thinking", input.thinkingLevel);
     const env = { ...process.env };
     // Keep the child on the same agent dir the app lists sessions from.
     if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = input.agentDir;
-    const rpc = new OmpRpcProcess(binary, args, { cwd: input.cwd, env });
-    const runtime = new OmpSessionRuntime(input.id, rpc, input.notify, input.onSessionFile, input.onExit);
+    const rpc = new OmpRpcProcess(binary, args, { cwd: input.cwd, env, mode: "rpc-ui" });
+    const runtime = new OmpSessionRuntime(input.id, input.planMode === true, rpc, input.notify, input.onSessionFile, input.onExit);
+    if (input.side) runtime.side = input.side;
     try {
       await Promise.race([
         rpc.ready,
         new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
       ]);
+      // Route omp's ask tool to the desktop's ask card.
+      // omp handles stdin in order, so this lands before the first prompt.
+      void rpc.request({ type: "set_ask_dialog", enabled: true }).catch(() => undefined);
       await runtime.refreshSessionFile();
     } catch (error) {
       rpc.dispose();
@@ -251,6 +330,7 @@ class OmpSessionRuntime {
     this.lastPromptUserId = userMessageId;
     this.promptRequestId = this.rpc.nextId("prompt");
     this.emit({ type: "agent_start" });
+    this.emitStatus();
     try {
       const data = await this.rpc.request<{ agentInvoked?: boolean }>({ id: this.promptRequestId, type: "prompt", message: content, ...(images.length ? { images } : {}) });
       // A local slash command finished without an agent turn; no prompt_result follows.
@@ -271,6 +351,249 @@ class OmpSessionRuntime {
     this.rpc.dispose();
   }
 
+  /** Interrupt the running turn with a message (delivered at the next turn boundary). */
+  async steer(content: string, optimisticId: string | undefined, images: unknown[] = []): Promise<void> {
+    if (!this.turnId) throw Object.assign(new Error("No active turn to steer"), { errorCode: "TURN_NOT_FOUND" });
+    if (optimisticId) this.pendingSteers.push({ text: content, optimisticId });
+    await this.rpc.request({ type: "steer", message: content, ...(images.length ? { images } : {}) });
+  }
+
+  /** Queue a message omp sends after the current run finishes. */
+  async followUp(content: string): Promise<void> {
+    if (!this.turnId) throw Object.assign(new Error("No active turn"), { errorCode: "TURN_NOT_FOUND" });
+    await this.rpc.request({ type: "follow_up", message: content });
+  }
+
+  queueEntries(): QueuedTurnSummary[] {
+    const createdAt = new Date().toISOString();
+    const entries: QueuedTurnSummary[] = [];
+    for (const queue of ["steering", "followUp"] as const) {
+      for (const message of this.queue[queue]) {
+        // A steer sent from the composer already shows in the transcript.
+        if (queue === "steering" && this.pendingSteers.some((steer) => steer.text === message)) continue;
+        entries.push({ id: ompQueueEntryId(queue, message), sessionId: this.id, content: message, position: entries.length, createdAt });
+      }
+    }
+    return entries;
+  }
+
+  async removeQueued(entryId: string): Promise<void> {
+    const entry = parseOmpQueueEntryId(entryId);
+    if (!entry) return;
+    await this.rpc.request({ type: "remove_queued_message", message: entry.message, queue: entry.queue });
+  }
+
+  async promoteQueued(entryId: string): Promise<void> {
+    const entry = parseOmpQueueEntryId(entryId);
+    if (!entry || entry.queue !== "followUp") return;
+    await this.rpc.request({ type: "promote_queued_message", message: entry.message });
+  }
+
+  async compact(throughMessageId?: string): Promise<void> {
+    if (throughMessageId && !this.lastMessageId) this.lastMessageId = throughMessageId;
+    if (this.turnId) throw Object.assign(new Error("Session already has an active turn"), { errorCode: "AGENT_BUSY" });
+    this.compactionReason = "manual";
+    this.emit({ type: "compaction_start", reason: "manual" });
+    this.emitStatus({ phase: "compacting", since: Date.now(), reason: "manual" });
+    try {
+      const result = await this.rpc.request<{ tokensBefore?: number; summary?: string }>({ type: "compact" }, 300_000);
+      this.emit({
+        type: "compaction_end",
+        reason: "manual",
+        ok: true,
+        willRetry: false,
+        ...(typeof result?.tokensBefore === "number" ? { tokensBefore: result.tokensBefore } : {}),
+        ...(this.compactionMark() ? { mark: this.compactionMark()! } : {}),
+      });
+    } catch (error) {
+      this.emit({
+        type: "compaction_end",
+        reason: "manual",
+        ok: false,
+        willRetry: false,
+        error: { code: "OMP_COMPACT_FAILED", message: error instanceof Error ? error.message : String(error) },
+      });
+      throw error;
+    } finally {
+      this.compactionReason = undefined;
+      this.emitStatus();
+    }
+  }
+
+  pendingInteractive(): { asks: AskToolRequest[]; permissions: ToolPermissionRequest[] } {
+    const asks: AskToolRequest[] = [];
+    const permissions: ToolPermissionRequest[] = [];
+    for (const pending of this.pendingUi.values()) {
+      if (pending.permission) permissions.push(pending.permission);
+      if (pending.ask) asks.push(pending.ask);
+    }
+    return { asks, permissions };
+  }
+
+  hasUiRequest(requestId: string): boolean {
+    return this.pendingUi.has(requestId);
+  }
+
+  /** Answer an omp tool-approval prompt. `allow-session` also approves later calls of the tool in this chat. */
+  resolvePermission(requestId: string, decision: string): boolean {
+    const pending = this.pendingUi.get(requestId);
+    if (!pending || pending.method !== "permission") return false;
+    this.pendingUi.delete(requestId);
+    const allow = decision === "allow-once" || decision === "allow-session" || decision === "allow-always";
+    if (allow && decision !== "allow-once" && pending.toolName) this.sessionAllowed.add(pending.toolName);
+    this.respond(requestId, { value: allow ? "Approve" : "Deny" });
+    this.emitStatus();
+    return true;
+  }
+
+  /** Answer an omp dialog shown as an ask card. A `null` answer cancels it. */
+  resolveAsk(requestId: string, answers: Array<string[] | null>): boolean {
+    const pending = this.pendingUi.get(requestId);
+    if (!pending || pending.method === "permission") return false;
+    this.pendingUi.delete(requestId);
+    const first = answers[0] ?? null;
+    if (pending.method === "ask") {
+      if (answers.every((answer) => answer === null)) return this.respond(requestId, { cancelled: true }), true;
+      const ids = pending.questionIds ?? [];
+      const optionSets = pending.ask?.questions.map((question) =>
+        new Set(question.options.map((option) => (typeof option === "string" ? option : option.label)))) ?? [];
+      this.respond(requestId, {
+        answers: ids.map((id, index) => {
+          const picked = answers[index] ?? [];
+          const selected = picked.filter((value) => optionSets[index]?.has(value));
+          const custom = picked.filter((value) => !optionSets[index]?.has(value)).join("\n");
+          return { id, selectedOptions: selected, ...(custom ? { customInput: custom } : {}) };
+        }),
+      });
+      return true;
+    }
+    if (first === null) return this.respond(requestId, { cancelled: true }), true;
+    if (pending.method === "confirm") this.respond(requestId, { confirmed: first[0] === "Yes" });
+    else this.respond(requestId, { value: first.join("\n") });
+    return true;
+  }
+
+  private respond(id: string, payload: Record<string, unknown>): void {
+    try { this.rpc.send({ type: "extension_ui_response", id, ...payload }); } catch { /* process gone */ }
+  }
+
+  private clearPendingUi(): void {
+    this.pendingUi.clear();
+  }
+
+  private toolCallFor(toolName: string): string | undefined {
+    let found: string | undefined;
+    for (const [toolCallId, name] of this.openTools) if (name === toolName) found = toolCallId;
+    return found;
+  }
+
+  private onUiRequest(frame: OmpFrame): void {
+    const id = String(frame.id ?? "");
+    const method = String(frame.method ?? "");
+    if (method === "cancel") {
+      const target = String(frame.targetId ?? "");
+      if (this.pendingUi.delete(target)) this.side("native.ui.cancelled", { sessionId: this.id, requestId: target });
+      return;
+    }
+    if (method === "notify") {
+      const message = String(frame.message ?? "").trim();
+      if (message) this.side("native.notice", { sessionId: this.id, level: frame.notifyType ?? "info", message });
+      return;
+    }
+    if (!id) return;
+    const title = String(frame.title ?? "");
+    if (method === "select") {
+      const options = Array.isArray(frame.options) ? frame.options.map(String) : [];
+      const approval = /^Allow tool: ([^\n]+)/.exec(title);
+      if (approval && options.includes("Approve") && options.includes("Deny")) {
+        const toolName = approval[1]!.trim();
+        if (this.planMode && !READ_ONLY_TOOLS.has(toolName)) return this.respond(id, { value: "Deny" });
+        if (this.sessionAllowed.has(toolName)) return this.respond(id, { value: "Approve" });
+        const toolCallId = this.toolCallFor(toolName) ?? `omp-approval:${id}`;
+        const permission: ToolPermissionRequest = {
+          requestId: id,
+          sessionId: this.id,
+          toolCallId,
+          toolName,
+          argsPreview: this.toolArgs.get(toolCallId) ?? {},
+          risk: toolName === "bash" || toolName === "python" ? "high" : "medium",
+          reason: title.split("\n").slice(1).join("\n").trim(),
+        };
+        this.pendingUi.set(id, { method: "permission", toolName, permission });
+        this.emit({ type: "tool_permission_request", request: permission });
+        this.emitStatus();
+        return;
+      }
+      return this.showAsk(id, "select", [{ question: title, options, multiSelect: false }]);
+    }
+    if (method === "confirm") {
+      const message = String(frame.message ?? "").trim();
+      return this.showAsk(id, "confirm", [{ question: message ? `${title}\n${message}` : title, options: ["Yes", "No"], multiSelect: false }]);
+    }
+    if (method === "input" || method === "editor") {
+      const placeholder = String(frame.placeholder ?? frame.prefill ?? "").trim();
+      return this.showAsk(id, "input", [{ question: placeholder ? `${title}\n${placeholder}` : title, options: [], multiSelect: false }]);
+    }
+    if (method === "ask") {
+      const questions = Array.isArray(frame.questions) ? frame.questions : [];
+      return this.showAsk(
+        id,
+        "ask",
+        questions.map((question: any) => ({
+          question: String(question?.question ?? question?.header ?? ""),
+          options: (Array.isArray(question?.options) ? question.options : []).map((option: any) =>
+            typeof option === "string"
+              ? option
+              : { label: String(option?.label ?? ""), ...(option?.description ? { description: String(option.description) } : {}) }),
+          multiSelect: question?.multi === true,
+        })),
+        questions.map((question: any) => String(question?.id ?? "")),
+      );
+    }
+    // setStatus / setWidget / setTitle / set_editor_text are TUI chrome: ignore.
+  }
+
+  private showAsk(id: string, method: PendingUi["method"], questions: AskToolRequest["questions"], questionIds?: string[]): void {
+    const ask: AskToolRequest = {
+      requestId: id,
+      sessionId: this.id,
+      toolCallId: this.toolCallFor("ask") ?? `omp-ui:${id}`,
+      questions,
+    };
+    this.pendingUi.set(id, { method, ask, ...(questionIds ? { questionIds } : {}) });
+    this.emit({ type: "asktool_request", request: ask });
+  }
+
+  private applyQueue(queue: { steering: string[]; followUp: string[] }): void {
+    this.queue = queue;
+    this.side("native.queue.changed", { sessionId: this.id, entries: this.queueEntries() });
+  }
+
+  private emitTodos(todos: SessionTodo[]): void {
+    this.side("native.todos.changed", { sessionId: this.id, todos });
+  }
+
+  private compactionMark(): ContextCompactionMark | undefined {
+    const through = this.lastMessageId;
+    if (!through) return undefined;
+    return { id: `omp-compaction:${randomUUID()}`, throughMessageId: through, summarized: true, generation: 1, summaryTokens: 0 };
+  }
+
+  private emitStatus(activity?: AgentActivity): void {
+    let pending = 0;
+    for (const entry of this.pendingUi.values()) if (entry.method === "permission") pending += 1;
+    this.emit({
+      type: "status",
+      status: {
+        sessionId: this.id,
+        isRunning: this.turnId !== undefined,
+        ...(this.turnId ? { currentTurnId: this.turnId } : {}),
+        pendingToolConfirmations: pending,
+        ...(activity ? { activity } : {}),
+      },
+    });
+  }
+
   private emit(event: AgentEvent): void {
     this.notify({ sessionId: this.id, turnId: this.turnId, ts: Date.now(), event });
   }
@@ -282,6 +605,9 @@ class OmpSessionRuntime {
       this.currentAssistant = undefined;
     }
     this.emit({ type: "agent_end", messageIds: [] });
+    this.clearPendingUi();
+    this.openTools.clear();
+    this.pendingSteers.length = 0;
     this.turnId = undefined;
     this.userMessageId = undefined;
     this.promptRequestId = undefined;
@@ -315,6 +641,65 @@ class OmpSessionRuntime {
         }
         return;
       }
+      case "extension_ui_request":
+        this.onUiRequest(frame);
+        return;
+      case "queue_update":
+        this.applyQueue({
+          steering: Array.isArray(frame.steering) ? frame.steering.map(String) : [],
+          followUp: Array.isArray(frame.followUp) ? frame.followUp.map(String) : [],
+        });
+        return;
+      case "auto_compaction_start": {
+        // Out of a turn (omp's idle compaction) it behaves like a manual one:
+        // the UI shows it as busy and clears that when it ends.
+        const reason: ContextCompactionReason = !this.turnId ? "manual" : frame.reason === "overflow" ? "overflow" : "threshold";
+        this.compactionReason = reason;
+        this.emit({ type: "compaction_start", reason });
+        this.emitStatus({ phase: "compacting", since: Date.now(), reason });
+        return;
+      }
+      case "auto_compaction_end": {
+        const reason = this.compactionReason ?? "threshold";
+        this.compactionReason = undefined;
+        const ok = !frame.aborted && !frame.errorMessage && !frame.skipped && Boolean(frame.result);
+        const mark = ok ? this.compactionMark() : undefined;
+        this.emit({
+          type: "compaction_end",
+          reason,
+          ok,
+          willRetry: frame.willRetry === true,
+          ...(typeof frame.result?.tokensBefore === "number" ? { tokensBefore: frame.result.tokensBefore } : {}),
+          ...(mark ? { mark } : {}),
+          ...(frame.errorMessage ? { error: { code: "OMP_COMPACTION_FAILED", message: String(frame.errorMessage) } } : {}),
+        });
+        this.emitStatus();
+        return;
+      }
+      case "auto_retry_start":
+        this.emitStatus({
+          phase: "retrying",
+          since: Date.now(),
+          attempt: Number(frame.attempt) || 1,
+          ...(Number(frame.delayMs) ? { retryDelayMs: Number(frame.delayMs) } : {}),
+          ...(frame.errorMessage ? { error: { code: "OMP_RETRY", message: String(frame.errorMessage) } } : {}),
+        });
+        return;
+      case "auto_retry_end":
+        this.emitStatus();
+        if (frame.success === false && frame.finalError) {
+          this.side("native.notice", { sessionId: this.id, level: "error", message: String(frame.finalError) });
+        }
+        return;
+      case "retry_fallback_applied":
+        this.side("native.notice", { sessionId: this.id, level: "warning", message: `Model fallback: ${String(frame.from ?? "")} → ${String(frame.to ?? "")}` });
+        return;
+      case "notice":
+        if (frame.message) this.side("native.notice", { sessionId: this.id, level: frame.level ?? "info", message: String(frame.message) });
+        return;
+      case "todo_auto_clear":
+        this.emitTodos([]);
+        return;
     }
     if (!this.turnId) return;
     switch (frame.type) {
@@ -350,10 +735,23 @@ class OmpSessionRuntime {
         const message = frame.message;
         const id = typeof frame.messageId === "string" ? frame.messageId : randomUUID();
         if (message?.role === "user") {
-          const projected = projectMessage(this.userMessageId ?? id, new Date().toISOString(), message);
-          if (projected && this.userMessageId) {
-            this.emit({ type: "user_message_persisted", optimisticMessageId: this.userMessageId, message: projected });
+          const text = textOf(message.content).text.trim();
+          const steerIndex = this.userMessageId ? -1 : this.pendingSteers.findIndex((steer) => steer.text.trim() === text);
+          const steer = steerIndex >= 0 ? this.pendingSteers.splice(steerIndex, 1)[0] : undefined;
+          const optimistic = this.userMessageId ?? steer?.optimisticId;
+          const projected = projectMessage(optimistic ?? id, new Date().toISOString(), message);
+          if (!projected) return;
+          this.lastMessageId = projected.id;
+          if (optimistic) {
+            this.emit({
+              type: "user_message_persisted",
+              optimisticMessageId: optimistic,
+              message: steer || message.steering ? { ...projected, steering: true } : projected,
+            });
             this.userMessageId = undefined;
+          } else {
+            // A queued follow-up or steer typed elsewhere: show it as it lands.
+            this.emit({ type: "message_end", message: message.steering ? { ...projected, steering: true } : projected });
           }
           return;
         }
@@ -361,6 +759,7 @@ class OmpSessionRuntime {
           const live = this.currentAssistant;
           const projected = projectMessage(live?.id ?? id, live?.createdAt ?? new Date().toISOString(), message, this.toolArgs);
           this.currentAssistant = undefined;
+          if (projected) this.lastMessageId = projected.id;
           if (projected) this.emit({ type: "message_end", message: projected, ...(live ? { replacesMessageId: live.id } : {}) });
           return;
         }
@@ -370,13 +769,19 @@ class OmpSessionRuntime {
       }
       case "tool_execution_start":
         this.toolArgs.set(frame.toolCallId, frame.args);
+        this.openTools.set(frame.toolCallId, frame.toolName);
         this.emit({ type: "tool_start", toolCallId: frame.toolCallId, toolName: frame.toolName, args: frame.args });
         return;
       case "tool_execution_update":
         this.emit({ type: "tool_update", toolCallId: frame.toolCallId, partialResult: frame.partialResult });
         return;
       case "tool_execution_end":
+        this.openTools.delete(frame.toolCallId);
         this.emit({ type: "tool_end", toolCallId: frame.toolCallId, result: frame.result, isError: frame.isError === true });
+        if (frame.toolName === "todo" && frame.isError !== true) {
+          const details = frame.result?.details;
+          if (details && details.op !== "view" && Array.isArray(details.phases)) this.emitTodos(ompPhasesToTodos(details.phases));
+        }
         return;
     }
   }
@@ -808,6 +1213,7 @@ export class OmpSessionService {
       messages,
       messageStart: start,
       ...(aroundIndex >= 0 ? { messageEnd: end, hasMoreAfter: end < all.length } : {}),
+      ...(file?.compactions.length ? { compactions: file.compactions, compaction: file.compactions.at(-1) } : {}),
     } as SessionDetail;
   }
 
@@ -853,6 +1259,8 @@ export class OmpSessionService {
       model: record.model ?? (record.path && existsSync(record.path) ? undefined : this.newSessionModel()),
       thinkingLevel: record.thinkingLevel ?? (record.path && existsSync(record.path) ? undefined : this.newSessionThinking()),
       agentDir: this.agentDir,
+      planMode: this.planModes.has(id),
+      side: (method, params) => this.side(method, params),
       notify,
       onSessionFile: (path) => {
         let real = path;
@@ -930,9 +1338,167 @@ export class OmpSessionService {
         sessionId: id,
         isRunning: runtime?.isRunning ?? false,
         ...(runtime?.currentTurnId ? { currentTurnId: runtime.currentTurnId } : {}),
-        pendingToolConfirmations: 0,
+        pendingToolConfirmations: runtime?.pendingInteractive().permissions.length ?? 0,
       },
     };
+  }
+
+  private side: OmpSideChannel = () => undefined;
+
+  /** Where queue / todo / notice updates go (the sidecar forwards them to main). */
+  setSideChannel(side: OmpSideChannel): void {
+    this.side = side;
+    for (const runtime of this.runtimes.values()) runtime.side = side;
+  }
+
+  private liveRuntime(id: string): OmpSessionRuntime {
+    const runtime = this.runtimes.get(id);
+    if (!runtime?.alive || !runtime.isRunning) {
+      throw Object.assign(new Error("No active turn"), { errorCode: "TURN_NOT_FOUND" });
+    }
+    return runtime;
+  }
+
+  async steer(id: string, content: string, optimisticId?: string, attachments: OmpPromptAttachment[] = []): Promise<{ accepted: true; turnId: string }> {
+    const runtime = this.liveRuntime(id);
+    const prepared = prepareOmpPrompt(content, attachments);
+    await runtime.steer(prepared.message, optimisticId, prepared.images);
+    return { accepted: true, turnId: runtime.currentTurnId! };
+  }
+
+  async followUp(id: string, content: string, attachments: OmpPromptAttachment[] = []): Promise<{ entry: QueuedTurnSummary }> {
+    const runtime = this.liveRuntime(id);
+    const message = prepareOmpPrompt(content, attachments).message;
+    await runtime.followUp(message);
+    const entryId = ompQueueEntryId("followUp", message);
+    const entries = runtime.queueEntries();
+    return {
+      entry: entries.find((entry) => entry.id === entryId) ?? {
+        id: entryId, sessionId: id, content: message, position: entries.length, createdAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  queueList(id: string): QueuedTurnSummary[] {
+    return this.runtimes.get(id)?.queueEntries() ?? [];
+  }
+
+  private queueOwner(entryId: string): OmpSessionRuntime | undefined {
+    for (const runtime of this.runtimes.values()) {
+      if (runtime.queueEntries().some((entry) => entry.id === entryId)) return runtime;
+    }
+    return undefined;
+  }
+
+  async queueRemove(entryId: string): Promise<void> {
+    await this.queueOwner(entryId)?.removeQueued(entryId);
+  }
+
+  async queuePromote(entryId: string): Promise<void> {
+    await this.queueOwner(entryId)?.promoteQueued(entryId);
+  }
+
+  /** Manual compaction (omp `compact`), outside a running turn. */
+  async compact(id: string, notify: OmpNotifier): Promise<{ accepted: true }> {
+    const record = this.record(id);
+    if (!(record.path && existsSync(record.path))) {
+      throw Object.assign(new Error("Nothing to compact yet"), { errorCode: "INVALID_ARGUMENT" });
+    }
+    const runtime = await this.runtimeFor(id, notify);
+    runtime.setNotifier(notify);
+    const last = this.readFile(record)?.messages.at(-1)?.id;
+    await runtime.compact(last);
+    return { accepted: true };
+  }
+
+  /** Every open approval / dialog of one chat (a reloaded window rebuilds its cards). */
+  pendingInteractive(id: string): { asks: AskToolRequest[]; permissions: ToolPermissionRequest[] } {
+    return this.runtimes.get(id)?.pendingInteractive() ?? { asks: [], permissions: [] };
+  }
+
+  resolvePermission(id: string | undefined, requestId: string, decision: string): boolean {
+    for (const [sessionId, runtime] of this.runtimes) {
+      if (id && sessionId !== id) continue;
+      if (runtime.resolvePermission(requestId, decision)) return true;
+    }
+    return false;
+  }
+
+  resolveAsk(id: string, requestId: string, answers: Array<string[] | null>): boolean {
+    return this.runtimes.get(id)?.resolveAsk(requestId, answers) ?? false;
+  }
+
+  hasUiRequest(requestId: string): boolean {
+    for (const runtime of this.runtimes.values()) if (runtime.hasUiRequest(requestId)) return true;
+    return false;
+  }
+
+  /** The chat's current omp todo list: live state, else the last todo result in its file. */
+  async todos(id: string): Promise<SessionTodo[]> {
+    const runtime = this.runtimes.get(id);
+    if (runtime?.alive) {
+      const state = await runtime.request<{ todoPhases?: unknown }>({ type: "get_state" }).catch(() => undefined);
+      if (state) return ompPhasesToTodos(state.todoPhases);
+    }
+    const record = this.records.get(id);
+    if (!record?.path || !existsSync(record.path)) return [];
+    let phases: unknown = [];
+    for (const line of readFileSync(record.path, "utf8").split("\n")) {
+      if (!line.includes('"todo"')) continue;
+      try {
+        const message = JSON.parse(line)?.message;
+        if (message?.role === "toolResult" && message.toolName === "todo" && !message.isError && Array.isArray(message.details?.phases)) {
+          phases = message.details.phases;
+        }
+      } catch { /* partial line */ }
+    }
+    return ompPhasesToTodos(phases);
+  }
+
+  /** Replace the todo list (an empty list clears it). Needs the chat's omp process. */
+  async setTodos(id: string, todos: SessionTodo[], notify: OmpNotifier): Promise<SessionTodo[]> {
+    const runtime = await this.runtimeFor(id, notify);
+    const phases = todos.length
+      ? [{
+          name: "Tasks",
+          tasks: todos.map((todo) => ({
+            content: todo.content,
+            status: todo.status === "cancelled" ? "abandoned" : todo.status,
+          })),
+        }]
+      : [];
+    const result = await runtime.request<{ todoPhases?: unknown }>({ type: "set_todos", phases });
+    const next = ompPhasesToTodos(result?.todoPhases ?? phases);
+    this.side("native.todos.changed", { sessionId: id, todos: next });
+    return next;
+  }
+
+  /** Chats in desktop plan mode (kept by id: session records get rebuilt on refresh). */
+  private readonly planModes = new Set<string>();
+
+  planMode(id: string): boolean {
+    return this.planModes.has(id);
+  }
+
+  /** Toggle desktop plan mode; the chat's omp process restarts on the next prompt. */
+  setPlanMode(id: string, enabled: boolean): boolean {
+    this.record(id);
+    const runtime = this.runtimes.get(id);
+    if (runtime?.isRunning) {
+      throw Object.assign(new Error("Wait for the current reply to finish"), { errorCode: "AGENT_BUSY" });
+    }
+    if (enabled) this.planModes.add(id);
+    else this.planModes.delete(id);
+    // The flags are fixed per omp process: restart it on the next prompt.
+    if (runtime && runtime.planMode !== enabled) this.dispose(id);
+    return enabled;
+  }
+
+  /** Drop idle processes so the next prompt picks up changed omp settings. */
+  recycleIdle(): void {
+    for (const [id, runtime] of this.runtimes) {
+      if (!runtime.isRunning) this.dispose(id);
+    }
   }
 
   async abort(id: string, expectedTurnId?: string): Promise<{ ok: boolean }> {

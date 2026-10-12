@@ -539,7 +539,9 @@ export function createSessionSlice({
         const liveMessages =
           (runningAtSelection ||
             currentState.runningSessions[id] === true ||
-            runtime.liveSessionTranscripts.has(id))
+            // omp writes its own session file, so an idle omp chat's file is
+            // authoritative; its live rows carry stream ids that never match.
+            (runtime.liveSessionTranscripts.has(id) && !id.startsWith("native-pi:")))
             ? currentState.activeSessionId === id
               ? currentState.messages
               : runtime.sessionTranscriptCache.get(id) ??

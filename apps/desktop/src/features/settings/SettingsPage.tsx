@@ -34,6 +34,7 @@ import {
 } from "../../components/icons";
 import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../components/ui";
 import { OmpRolesPage } from "./OmpRolesPage";
+import { OmpApprovalSection } from "./OmpApprovalSection";
 import { KeyboardShortcutsSection } from "../../components/settings/KeyboardShortcutsSection";
 import { FontFamilyRow } from "../../components/settings/FontFamilyRow";
 import { ThinkingDisplayModeRow } from "../../components/settings/ThinkingDisplayModeRow";
@@ -554,7 +555,12 @@ export function SettingsPage() {
             </div>
           )}
 
-          {tab === "agent" && <OmpRolesPage />}
+          {tab === "agent" && (
+            <>
+              <OmpRolesPage />
+              <OmpApprovalSection />
+            </>
+          )}
 
           {tab === "skills" && <AgentSkillsPage />}
 

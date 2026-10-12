@@ -1,6 +1,7 @@
 export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 16 as const;
-export const APP_ID = "net.aiuo.pi-desktop";
+/** OMP Desktop fork: its own app id so it never collides with upstream PI-Desktop installs. */
+export const APP_ID = "io.github.emmeet.omp-desktop";
 export const APP_NAME = "PI-Desktop";
 export const APP_VERSION = "0.18.0";
 
@@ -134,6 +135,11 @@ export const IPC = {
     ompFastGet: "pi-desktop/omp/fast/get",
     ompFastSet: "pi-desktop/omp/fast/set",
     ompRoleSet: "pi-desktop/omp/roles/set",
+    ompApprovalGet: "pi-desktop/omp/approval/get",
+    ompApprovalSet: "pi-desktop/omp/approval/set",
+    ompPlanGet: "pi-desktop/omp/plan/get",
+    ompPlanSet: "pi-desktop/omp/plan/set",
+    ompTodosSet: "pi-desktop/omp/todos/set",
     sessionFork: "pi-desktop/session/fork",
     sessionMoveProject: "pi-desktop/session/moveProject",
     sessionSearch: "pi-desktop/session/search",

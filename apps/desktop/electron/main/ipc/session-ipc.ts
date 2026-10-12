@@ -138,12 +138,17 @@ export function registerSessionIpc({
     return host.call("search.context", input);
   });
   handle(IPC.invoke.todosGet, async (input: { sessionId?: unknown } = {}) => {
-    if (!host) throw new Error("host unavailable");
     if (typeof input.sessionId !== "string" || !input.sessionId.trim()) {
       throw Object.assign(new Error("sessionId is required"), {
         errorCode: ErrorCodes.INVALID_ARGUMENT,
       });
     }
+    if (input.sessionId.startsWith("native-pi:")) {
+      if (!sidecar) throw new Error("agent sidecar unavailable");
+      const { todos } = await sidecar.call<{ todos: unknown[] }>("omp.todos.get", { sessionId: input.sessionId });
+      return { sessionId: input.sessionId, todos, revision: Date.now(), updatedAt: Date.now() };
+    }
+    if (!host) throw new Error("host unavailable");
     return host.call("todos.get", { sessionId: input.sessionId });
   });
   handle(IPC.invoke.sessionList, async () => {
@@ -202,6 +207,53 @@ export function registerSessionIpc({
       throw Object.assign(new Error("role is required"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
     }
     return sidecar.call("omp.roles.set", { role: input.role, model: typeof input.model === "string" ? input.model : null });
+  });
+  handle(IPC.invoke.ompApprovalGet, async () => {
+    const read = async (key: string) => (JSON.parse(await (await import("../omp-capability-sync")).runOmpConfig(["get", key, "--json"])) as { value?: unknown }).value;
+    const mode = await read("tools.approvalMode");
+    const rules = await read("tools.approval");
+    return {
+      mode: typeof mode === "string" ? mode : "yolo",
+      rules: rules && typeof rules === "object" && !Array.isArray(rules) ? rules : {},
+    };
+  });
+  handle(IPC.invoke.ompApprovalSet, async (input: { mode?: unknown; rules?: unknown } = {}) => {
+    if (input.mode !== undefined) {
+      if (input.mode !== "always-ask" && input.mode !== "write" && input.mode !== "yolo") {
+        throw Object.assign(new Error("Unknown approval mode"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+      }
+      await (await import("../omp-capability-sync")).runOmpConfig(["set", "tools.approvalMode", input.mode]);
+    }
+    if (input.rules !== undefined) {
+      const rules = input.rules && typeof input.rules === "object" && !Array.isArray(input.rules) ? input.rules as Record<string, unknown> : null;
+      const clean: Record<string, string> = {};
+      for (const [tool, policy] of Object.entries(rules ?? {})) {
+        if (!/^[\w.:-]{1,80}$/.test(tool) || (policy !== "allow" && policy !== "prompt" && policy !== "deny")) {
+          throw Object.assign(new Error(`Invalid approval rule for ${tool}`), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+        }
+        clean[tool] = policy;
+      }
+      await (await import("../omp-capability-sync")).runOmpConfig(["set", "tools.approval", JSON.stringify(clean)]);
+    }
+    // Running chats keep the policy they started with; idle ones restart with the new one.
+    await sidecar?.call("omp.runtimes.recycle", {}).catch(() => undefined);
+    return { ok: true };
+  });
+  handle(IPC.invoke.ompPlanGet, async (input: { sessionId?: string } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.plan.get", { sessionId: String(input?.sessionId ?? "") });
+  });
+  handle(IPC.invoke.ompPlanSet, async (input: { sessionId?: string; enabled?: boolean } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    return sidecar.call("omp.plan.set", { sessionId: String(input?.sessionId ?? ""), enabled: input?.enabled === true });
+  });
+  handle(IPC.invoke.ompTodosSet, async (input: { sessionId?: string; todos?: unknown } = {}) => {
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    const result = await sidecar.call<{ todos: unknown[] }>("omp.todos.set", {
+      sessionId: String(input?.sessionId ?? ""),
+      todos: Array.isArray(input?.todos) ? input.todos : [],
+    });
+    return { sessionId: String(input?.sessionId ?? ""), todos: result.todos, revision: Date.now(), updatedAt: Date.now() };
   });
   handle(IPC.invoke.ompThinkingSet, async (input: { sessionId?: string; level?: string } = {}) => {
     if (!sidecar) throw new Error("agent sidecar unavailable");

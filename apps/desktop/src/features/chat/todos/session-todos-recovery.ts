@@ -12,7 +12,8 @@ export function startSessionTodosRecovery(
   sessionId: string,
   { getTodos, onHostStatus, applySnapshot, reportError }: RecoveryDependencies,
 ): () => void {
-  if (sessionId.startsWith("remote:") || sessionId.startsWith("native-pi:")) {
+  // omp (native-pi:) chats read their list from omp's todo state.
+  if (sessionId.startsWith("remote:")) {
     return () => undefined;
   }
 

@@ -608,6 +608,16 @@ export const api = {
     invoke<{ roles: OmpRole[] }>(IPC.invoke.ompRolesList, {}),
   ompSetRole: (input: { role: string; model: string | null }) =>
     invoke<{ roles: OmpRole[] }>(IPC.invoke.ompRoleSet, input),
+  ompApprovalGet: () =>
+    invoke<{ mode: "always-ask" | "write" | "yolo"; rules: Record<string, "allow" | "prompt" | "deny"> }>(IPC.invoke.ompApprovalGet, {}),
+  ompApprovalSet: (input: { mode?: "always-ask" | "write" | "yolo"; rules?: Record<string, "allow" | "prompt" | "deny"> }) =>
+    invoke<{ ok: boolean }>(IPC.invoke.ompApprovalSet, input),
+  ompPlanGet: (sessionId: string) =>
+    invoke<{ enabled: boolean }>(IPC.invoke.ompPlanGet, { sessionId }),
+  ompPlanSet: (sessionId: string, enabled: boolean) =>
+    invoke<{ enabled: boolean }>(IPC.invoke.ompPlanSet, { sessionId, enabled }),
+  ompTodosSet: (sessionId: string, todos: SessionTodoSnapshot["todos"]) =>
+    invoke<SessionTodoSnapshot>(IPC.invoke.ompTodosSet, { sessionId, todos }),
   ompSetThinking: (input: { sessionId?: string; level: string }) =>
     invoke<{ session: SessionSummary | null }>(IPC.invoke.ompThinkingSet, input),
   createSession: (input?: Partial<SessionSummary>) =>

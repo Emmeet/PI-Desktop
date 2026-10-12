@@ -1,6 +1,7 @@
 /** Shared public types grouped by the owning application domain. */
 export type Risk = "low" | "medium" | "high";
-export type PermissionDecision = "allow-once" | "allow-session" | "deny";
+/** `allow-always` is omp-only: it writes an omp per-tool `allow` rule. */
+export type PermissionDecision = "allow-once" | "allow-session" | "allow-always" | "deny";
 /** Permission mode (D115): how high-risk tool calls are approved.
  * `inherit` (sessions only) falls back to the global default. */
 export const PERMISSION_MODES = ["inherit", "ask", "accept-edits", "auto"] as const;

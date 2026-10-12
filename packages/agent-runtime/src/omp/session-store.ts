@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { UiMessage } from "@pi-desktop/shared";
+import type { ContextCompactionRecord, UiMessage } from "@pi-desktop/shared";
 
 /** Parsed view of one omp session file (`~/.omp/agent/sessions/<cwd>/<ts>_<id>.jsonl`). */
 export type OmpSessionFile = {
@@ -16,6 +16,8 @@ export type OmpSessionFile = {
   /** omp fast mode (a priority/ultrafast service tier) recorded in the file. */
   fast?: boolean;
   messages: UiMessage[];
+  /** omp compaction entries on the active branch, shown as transcript rows. */
+  compactions: ContextCompactionRecord[];
 };
 
 type Entry = Record<string, any>;
@@ -150,6 +152,7 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
   branch.reverse();
   const toolArgs = new Map<string, unknown>();
   const messages: UiMessage[] = [];
+  const compactions: ContextCompactionRecord[] = [];
   let model: { providerId?: string; modelId?: string } = {};
   let thinkingLevel: string | undefined;
   let fast: boolean | undefined;
@@ -167,7 +170,19 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
       if (entry.message?.role === "assistant" && typeof entry.message.provider === "string" && typeof entry.message.model === "string") {
         model = { providerId: entry.message.provider, modelId: entry.message.model };
       }
-    } else if ((entry.type === "compaction" || entry.type === "branch_summary") && typeof entry.summary === "string") {
+    } else if (entry.type === "compaction" && typeof entry.summary === "string") {
+      const through = messages.at(-1)?.id;
+      if (through) {
+        compactions.push({
+          id: entry.id,
+          summary: entry.summary,
+          throughMessageId: through,
+          tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : 0,
+          details: { generation: compactions.length + 1 },
+          createdAt: ts,
+        });
+      }
+    } else if (entry.type === "branch_summary" && typeof entry.summary === "string") {
       messages.push({ id: entry.id, role: "system", content: entry.summary, createdAt: ts, status: "complete" });
     }
   }
@@ -184,6 +199,7 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(fast !== undefined ? { fast } : {}),
     messages,
+    compactions,
   };
 }
 

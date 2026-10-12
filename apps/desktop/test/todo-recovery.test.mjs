@@ -166,15 +166,17 @@ test("TodoDock keeps newer events and drops old-host and switched-session reads"
   } finally { await h.close(); }
 });
 
-test("TodoDock never reads the local host for remote or native sessions", async () => {
+test("TodoDock never reads the local host for remote sessions and recovers omp todos", async () => {
   const h = await harness();
   try {
     h.render("remote:server:session-a");
-    h.render("native-pi:session-a");
     h.emit(IPC.event.hostStatus, { ok: true, component: "host", restarted: true });
     await h.settle();
     assert.deepEqual(h.reads, []);
     assert.equal(h.listenerCount(IPC.event.hostStatus), 0);
+    h.render("native-pi:session-a");
+    await h.settle();
+    assert.deepEqual(h.reads, ["native-pi:session-a"]);
   } finally { await h.close(); }
 });
 

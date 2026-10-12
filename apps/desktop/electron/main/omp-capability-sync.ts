@@ -19,6 +19,7 @@
  * Only entries this module wrote (tracked in a manifest under the app data
  * dir) are ever replaced or removed; the user's own omp config is preserved.
  */
+import { resolveOmpBinary } from "@pi-desktop/agent-runtime/omp-binary";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -47,15 +48,27 @@ export function ompAgentDir(): string {
 }
 
 function ompBinary(): string {
-  const override = process.env.PI_DESKTOP_OMP_BIN?.trim();
-  if (override) return override;
-  const bun = join(process.env.BUN_INSTALL || join(homedir(), ".bun"), "bin", process.platform === "win32" ? "omp.exe" : "omp");
-  return existsSync(bun) ? bun : "omp";
+  try {
+    // Same lookup the agent runtime uses (PATH, Bun / npm global bins, Windows shims).
+    return resolveOmpBinary();
+  } catch {
+    const bun = join(process.env.BUN_INSTALL || join(homedir(), ".bun"), "bin", process.platform === "win32" ? "omp.exe" : "omp");
+    return existsSync(bun) ? bun : "omp";
+  }
 }
 
-function runOmpConfig(args: string[]): Promise<string> {
+/** Quote one argument for cmd.exe (npm's omp.cmd shim needs a shell on Windows). */
+function winQuote(arg: string): string {
+  return /^[\w@%+=:,./\\-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '""')}"`;
+}
+
+export function runOmpConfig(args: string[]): Promise<string> {
+  const binary = ompBinary();
+  const shim = process.platform === "win32" && /\.(cmd|bat)$/i.test(binary);
+  const command = shim ? `"${binary}"` : binary;
+  const argv = shim ? ["config", ...args].map(winQuote) : ["config", ...args];
   return new Promise((resolve, reject) => {
-    execFile(ompBinary(), ["config", ...args], { timeout: 20_000, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+    execFile(command, argv, { timeout: 20_000, maxBuffer: 1 << 20, windowsHide: true, ...(shim ? { shell: true } : {}) }, (err, stdout, stderr) => {
       if (err) reject(new Error(`omp config ${args[0]} failed: ${String(stderr || err.message).trim().slice(0, 300)}`));
       else resolve(stdout);
     });

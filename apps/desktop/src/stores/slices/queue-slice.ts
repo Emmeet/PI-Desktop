@@ -300,7 +300,8 @@ export function createQueueSlice({
         prioritized = true;
         // Send now keeps its graceful stop: the active turn reaches its
         // boundary before the promoted row starts.
-        if (get().runningSessions[sessionId] &&
+        // omp promotes the row to its steering queue instead: no stop needed.
+        if (!sessionId.startsWith("native-pi:") && get().runningSessions[sessionId] &&
             queuedPromptForSession(get().queuedPrompts, sessionId, promptId)) {
           const result = await api.stop(sessionId);
           if (!result.requested) {
@@ -392,16 +393,7 @@ export function createQueueSlice({
         if (!sessionId) throw new Error(i18n.t("errors.noActiveSession"));
         if (get().pendingPlans[sessionId]?.status === "pending") return false;
         if (get().runningSessions[sessionId]) {
-          // Native Pi children have no Desktop prompt queue. Reject the send
-          // here so the caller restores the draft instead of round-tripping a
-          // queue item the backend refuses.
-          if (
-            get().sessions.find((session) => session.id === sessionId)?.source ===
-            "pi-native"
-          ) {
-            get().showToast(i18n.t("chat.nativeSessionBusy"), { variant: "info" });
-            return false;
-          }
+          // omp chats queue this as an omp follow-up (sent when the run ends).
           const accepted = await get().enqueuePrompt(content, draft, sessionId);
           if (accepted) onAccepted?.(sessionId);
           return accepted;

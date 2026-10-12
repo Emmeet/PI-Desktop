@@ -55,7 +55,10 @@ type RuntimeMap = Map<string, DesktopAgentRuntime>;
 type OmpModule = typeof import("./omp/service.js");
 let ompModule: OmpModule | undefined;
 async function loadOmp(): Promise<OmpModule> {
-  ompModule ??= await import("./omp/service.js");
+  if (!ompModule) {
+    ompModule = await import("./omp/service.js");
+    ompModule.ompSessionService().setSideChannel((method, params) => notify(method, params));
+  }
   return ompModule;
 }
 
@@ -469,6 +472,71 @@ async function handle(method: string, params: any): Promise<unknown> {
       const roles = await omp.setOmpRole(String(params.role ?? ""), model);
       await omp.ompSessionService().refreshDefaultRole();
       return { roles };
+    }
+    case "omp.ui.respond": {
+      const service = (await loadOmp()).ompSessionService();
+      const sessionId = typeof params.sessionId === "string" ? params.sessionId : "";
+      const requestId = String(params.requestId ?? "");
+      if (Array.isArray(params.answers)) {
+        return { ok: service.resolveAsk(sessionId, requestId, params.answers as Array<string[] | null>) };
+      }
+      return { ok: service.resolvePermission(sessionId || undefined, requestId, String(params.decision ?? "deny")) };
+    }
+    case "omp.ui.has": {
+      return { ok: (await loadOmp()).ompSessionService().hasUiRequest(String(params.requestId ?? "")) };
+    }
+    case "omp.ui.pending": {
+      return (await loadOmp()).ompSessionService().pendingInteractive(String(params.sessionId ?? ""));
+    }
+    case "omp.steer": {
+      const sessionId = String(params.sessionId ?? "");
+      return (await loadOmp()).ompSessionService().steer(
+        sessionId,
+        String(params.content ?? ""),
+        typeof params.messageId === "string" ? params.messageId : undefined,
+        Array.isArray(params.attachments) ? (params.attachments as any[]) : [],
+      );
+    }
+    case "omp.followUp": {
+      return (await loadOmp()).ompSessionService().followUp(
+        String(params.sessionId ?? ""),
+        String(params.content ?? ""),
+        Array.isArray(params.attachments) ? (params.attachments as any[]) : [],
+      );
+    }
+    case "omp.queue.list": {
+      return { entries: (await loadOmp()).ompSessionService().queueList(String(params.sessionId ?? "")) };
+    }
+    case "omp.queue.remove": {
+      await (await loadOmp()).ompSessionService().queueRemove(String(params.entryId ?? ""));
+      return { ok: true };
+    }
+    case "omp.queue.promote": {
+      await (await loadOmp()).ompSessionService().queuePromote(String(params.entryId ?? ""));
+      return { ok: true };
+    }
+    case "omp.compact": {
+      const onEvent = (envelope: AgentEventEnvelope) => notify("native.agent.event", envelope);
+      return (await loadOmp()).ompSessionService().compact(String(params.sessionId ?? ""), onEvent);
+    }
+    case "omp.todos.get": {
+      const sessionId = String(params.sessionId ?? "");
+      return { todos: await (await loadOmp()).ompSessionService().todos(sessionId) };
+    }
+    case "omp.todos.set": {
+      const onEvent = (envelope: AgentEventEnvelope) => notify("native.agent.event", envelope);
+      const todos = Array.isArray(params.todos) ? (params.todos as any[]) : [];
+      return { todos: await (await loadOmp()).ompSessionService().setTodos(String(params.sessionId ?? ""), todos, onEvent) };
+    }
+    case "omp.plan.get": {
+      return { enabled: (await loadOmp()).ompSessionService().planMode(String(params.sessionId ?? "")) };
+    }
+    case "omp.plan.set": {
+      return { enabled: (await loadOmp()).ompSessionService().setPlanMode(String(params.sessionId ?? ""), params.enabled === true) };
+    }
+    case "omp.runtimes.recycle": {
+      (await loadOmp()).ompSessionService().recycleIdle();
+      return { ok: true };
     }
     case "omp.thinking.set": {
       const session = await (await loadOmp()).ompSessionService().setThinkingLevel({

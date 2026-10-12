@@ -20,6 +20,8 @@ export function PermissionCard({
   const workspace = useAppStore((state) =>
     state.sessions.find((session) => session.id === permission.sessionId)?.projectPath,
   );
+  // omp chats can also save the choice as an omp per-tool rule.
+  const omp = permission.sessionId.startsWith("native-pi:");
   const [resolving, setResolving] = useState(false);
 
   const restoreComposerFocus = () => {
@@ -29,7 +31,7 @@ export function PermissionCard({
   };
 
   const resolve = async (
-    decision: "allow-once" | "allow-session" | "deny",
+    decision: "allow-once" | "allow-session" | "allow-always" | "deny",
   ) => {
     if (resolving) return;
     setResolving(true);
@@ -118,6 +120,16 @@ export function PermissionCard({
         >
           {t("permission.allowSession")}
         </Button>
+        {omp ? (
+          <Button
+            variant="secondary"
+            disabled={resolving}
+            title={t("permission.allowAlwaysHint", { tool: permission.toolName })}
+            onClick={() => void resolve("allow-always")}
+          >
+            {t("permission.allowAlways")}
+          </Button>
+        ) : null}
         <Button
           variant="primary"
           disabled={resolving}

@@ -72,7 +72,15 @@ function createRelocatedUpdater(
   return platform === "win32" ? new RelocatedNsisUpdater(baseCachePath) : null;
 }
 
-export const RELEASES_URL = "https://github.com/vastsa/PI-Desktop/releases/latest";
+export const RELEASES_URL = "https://github.com/Emmeet/PI-Desktop/releases/latest";
+
+/**
+ * OMP Desktop is a fork with no published releases yet, so update checks are
+ * off unless PI_DESKTOP_ENABLE_UPDATES=1. The feed (package.json `publish` and
+ * RELEASES_URL) points at Emmeet/PI-Desktop, never at upstream: an upstream
+ * PI-Desktop release must not install itself over this app.
+ */
+export const UPDATES_ENABLED = process.env.PI_DESKTOP_ENABLE_UPDATES === "1";
 
 const AUTO_CHECK_INITIAL_DELAY_MS = 15_000;
 const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -597,7 +605,7 @@ export class AppUpdaterController {
   async check(options: { manual?: boolean } = {}): Promise<UpdateState> {
     await this.ensureSettingsLoaded();
     if (this.state.mode === "disabled") {
-      throw new Error("updates are disabled in development builds");
+      throw new Error("updates are turned off in this build (no OMP Desktop releases are published yet)");
     }
     if (
       this.state.status === "checking" ||

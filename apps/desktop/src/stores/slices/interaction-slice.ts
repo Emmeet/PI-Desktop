@@ -130,7 +130,7 @@ export function createInteractionSlice({
       const permission = headPermission(get().pendingPermissions, sessionId);
       if (!permission || permission.requestId !== requestId) return;
       try {
-        await api.resolvePermission({ requestId, decision });
+        await api.resolvePermission({ requestId, decision, sessionId });
       } finally {
         set((state) => ({
           pendingPermissions: removePermission(

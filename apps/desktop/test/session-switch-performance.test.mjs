@@ -186,7 +186,7 @@ test("reopening an idle session keeps a completed live tail until the durable pa
     sessionSlice.match(/selectSession: async[\s\S]*?\n    newSession: async/)?.[0] ?? "";
   assert.match(
     selectBlock,
-    /runningAtSelection \|\|\s*currentState\.runningSessions\[id\] === true \|\|\s*runtime\.liveSessionTranscripts\.has\(id\)/,
+    /runningAtSelection \|\|\s*currentState\.runningSessions\[id\] === true \|\|[\s\S]*?runtime\.liveSessionTranscripts\.has\(id\)/,
   );
   assert.match(selectBlock, /durableCoversLiveSessionMessages\(/);
   assert.doesNotMatch(

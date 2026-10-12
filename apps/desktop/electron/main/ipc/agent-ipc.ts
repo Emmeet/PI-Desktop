@@ -56,6 +56,18 @@ function rejectNativeAgentOperation(sessionId: string): void {
   }
 }
 
+/** omp reads attachments itself: forward only absolute local paths. */
+function nativeAttachments(attachments: AgentPromptRequest["attachments"] | undefined) {
+  return (attachments ?? [])
+    .filter((attachment) => typeof attachment?.path === "string" && isAbsolute(attachment.path))
+    .map((attachment) => ({
+      path: attachment.path,
+      name: attachment.name,
+      kind: attachment.kind === "image" ? "image" : "file",
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+    }));
+}
+
 function parseVoiceOrigin(value: unknown): VoiceOrigin | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -116,6 +128,19 @@ export function registerAgentIpc({
     });
   };
   handle(IPC.invoke.agentSteer, async (req: AgentSteerRequest) => {
+    if (req?.sessionId?.startsWith("native-pi:")) {
+      if (!sidecar) throw new Error("sidecar unavailable");
+      if (typeof req.content !== "string" || !req.content.trim()) {
+        throw Object.assign(new Error("Steering input required"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+      }
+      // omp delivers the steer at its next turn boundary.
+      return sidecar.call<{ accepted: boolean; turnId: string }>("omp.steer", {
+        sessionId: req.sessionId,
+        content: req.content,
+        messageId: req.messageId,
+        attachments: nativeAttachments(req.attachments),
+      });
+    }
     if (!host || !sidecar) throw new Error("backend unavailable");
     if (
       !req?.sessionId || typeof req.content !== "string" || !req.expectedTurnId ||
@@ -194,15 +219,7 @@ export function registerAgentIpc({
           errorCode: ErrorCodes.INVALID_ARGUMENT,
         });
       }
-      // omp reads the files itself: forward only absolute local paths.
-      const attachments = (req.attachments ?? [])
-        .filter((attachment) => typeof attachment?.path === "string" && isAbsolute(attachment.path))
-        .map((attachment) => ({
-          path: attachment.path,
-          name: attachment.name,
-          kind: attachment.kind === "image" ? "image" : "file",
-          ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
-        }));
+      const attachments = nativeAttachments(req.attachments);
       setNotificationViewingSessionId(req.sessionId);
       return sidecar.call("agent.prompt", {
         sessionId: req.sessionId,
@@ -583,7 +600,10 @@ export function registerAgentIpc({
   });
 
   handle(IPC.invoke.agentCompact, async (req: { sessionId: string }) => {
-    rejectNativeAgentOperation(req.sessionId);
+    if (req.sessionId.startsWith("native-pi:")) {
+      if (!sidecar) throw new Error("sidecar unavailable");
+      return sidecar.call("omp.compact", { sessionId: req.sessionId });
+    }
     if (!host || !sidecar) throw new Error("backend unavailable");
     if (activeTurns.has(req.sessionId)) {
       throw Object.assign(new Error("Session already has an active turn"), {
@@ -718,21 +738,42 @@ export function registerAgentIpc({
   // The Host-owned turn queue (D375 / D386). The renderer mirrors it; the
   // headless module admits, orders, and drains it.
   handle(IPC.invoke.agentQueuePush, async (req: AgentQueuePushRequest) => {
-    rejectNativeAgentOperation(req.sessionId);
+    if (req.sessionId.startsWith("native-pi:")) {
+      // omp keeps its own follow-up queue; it sends them after the run ends.
+      if (!sidecar) throw new Error("sidecar unavailable");
+      const { entry } = await sidecar.call<{ entry: unknown }>("omp.followUp", {
+        sessionId: req.sessionId,
+        content: req.content,
+        attachments: nativeAttachments(req.attachments),
+      });
+      return entry;
+    }
     if (!agentHostBridge) throw new Error("agent host unavailable");
     return agentHostBridge.queue.push(req);
   });
   handle(IPC.invoke.agentQueueList, async (req: { sessionId: string }) => {
-    rejectNativeAgentOperation(req.sessionId);
+    if (req.sessionId.startsWith("native-pi:")) {
+      if (!sidecar) throw new Error("sidecar unavailable");
+      return sidecar.call("omp.queue.list", { sessionId: req.sessionId });
+    }
     if (!agentHostBridge) throw new Error("agent host unavailable");
     return { entries: agentHostBridge.queue.list(req.sessionId) };
   });
   handle(IPC.invoke.agentQueueRemove, async (req: { turnId: string }) => {
+    if (req.turnId?.startsWith("ompq:")) {
+      if (!sidecar) throw new Error("sidecar unavailable");
+      return sidecar.call("omp.queue.remove", { entryId: req.turnId });
+    }
     if (!agentHostBridge) throw new Error("agent host unavailable");
     await agentHostBridge.queue.remove(req.turnId);
     return { ok: true };
   });
   handle(IPC.invoke.agentQueuePrioritize, async (req: { turnId: string }) => {
+    if (req.turnId?.startsWith("ompq:")) {
+      // "Send now" in omp: move the follow-up into the steering queue.
+      if (!sidecar) throw new Error("sidecar unavailable");
+      return sidecar.call("omp.queue.promote", { entryId: req.turnId });
+    }
     if (!agentHostBridge) throw new Error("agent host unavailable");
     await agentHostBridge.queue.prioritize(req.turnId);
     return { ok: true };
@@ -741,6 +782,9 @@ export function registerAgentIpc({
   handle(
     IPC.invoke.agentQueueReorder,
     async (req: { turnId: string; direction: "up" | "down" }) => {
+      if (req.turnId?.startsWith("ompq:")) {
+        throw Object.assign(new Error("omp keeps queued messages in send order"), { errorCode: "NATIVE_PI_UNSUPPORTED" });
+      }
       if (!agentHostBridge) throw new Error("agent host unavailable");
       if (req.direction !== "up" && req.direction !== "down") {
         throw new Error(`unknown queue reorder direction: ${String(req.direction)}`);
@@ -752,7 +796,33 @@ export function registerAgentIpc({
   handle(IPC.invoke.toolResolvePermission, async (resolution: {
     requestId: string;
     decision: string;
+    sessionId?: string;
   }) => {
+    if (sidecar && (resolution.sessionId?.startsWith("native-pi:") ||
+      (await sidecar.call<{ ok: boolean }>("omp.ui.has", { requestId: resolution.requestId }).catch(() => ({ ok: false }))).ok)) {
+      logger.app("permission", "info", "omp permission resolved", {
+        data: { requestId: resolution.requestId, decision: resolution.decision },
+      });
+      if (resolution.decision === "allow-always") {
+        // Persist "always allow" as an omp per-tool rule, then approve this call.
+        const pending = await sidecar.call<{ permissions: Array<{ requestId: string; toolName: string }> }>(
+          "omp.ui.pending", { sessionId: resolution.sessionId ?? "" },
+        ).catch(() => ({ permissions: [] }));
+        const toolName = pending.permissions.find((entry) => entry.requestId === resolution.requestId)?.toolName;
+        if (toolName) {
+          const current = JSON.parse(await (await import("../omp-capability-sync")).runOmpConfig(["get", "tools.approval", "--json"])) as { value?: unknown };
+          const rules = current.value && typeof current.value === "object" && !Array.isArray(current.value)
+            ? current.value as Record<string, string>
+            : {};
+          await (await import("../omp-capability-sync")).runOmpConfig(["set", "tools.approval", JSON.stringify({ ...rules, [toolName]: "allow" })]);
+        }
+      }
+      return sidecar.call("omp.ui.respond", {
+        sessionId: resolution.sessionId ?? "",
+        requestId: resolution.requestId,
+        decision: resolution.decision,
+      });
+    }
     if (!host) throw new Error("host unavailable");
     logger.app("permission", "info", "permission resolved", {
       data: { requestId: resolution.requestId, decision: resolution.decision },
@@ -773,6 +843,9 @@ export function registerAgentIpc({
     const sessionId = String(resolution?.sessionId ?? "").trim();
     const requestId = String(resolution?.requestId ?? "").trim();
     if (!sessionId || !requestId) throw new Error("asktool resolution identity required");
+    if (sessionId.startsWith("native-pi:")) {
+      return sidecar.call("omp.ui.respond", { sessionId, requestId, answers: resolution.answers ?? [] });
+    }
     // Prefer the Host-owned input path when it still holds this ask: it
     // deletes the pending input before settling the sidecar, so switching
     // windows back to the session cannot resurrect the answered card via
@@ -802,7 +875,9 @@ export function registerAgentIpc({
       throw Object.assign(new Error("sessionId required"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
     }
     const empty: PendingInteractiveRequests = { asks: [], permissions: [] };
-    if (sessionId.startsWith("native-pi:")) return empty;
+    if (sessionId.startsWith("native-pi:")) {
+      return sidecar ? sidecar.call<PendingInteractiveRequests>("omp.ui.pending", { sessionId }).catch(() => empty) : empty;
+    }
     const bridge = getAgentHostBridge();
     return bridge ? bridge.pendingInteractiveRequests(sessionId) : empty;
   });
