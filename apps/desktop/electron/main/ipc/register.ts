@@ -12,6 +12,7 @@ import { registerAppIpc } from "./app-ipc";
 import { registerDiagnosticsIpc } from "./diagnostics-ipc";
 import { registerMarketIpc } from "./market-ipc";
 import { registerMcpIpc } from "./mcp-ipc";
+import { createOmpCapabilitySync } from "../omp-capability-sync";
 import type { McpOAuthManager } from "../mcp-oauth";
 import { searchMcpMarket } from "../mcp-registry-catalog";
 import { registerNotificationIpc } from "./notification-ipc";
@@ -423,6 +424,21 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   });
 
 
+  // Settings → Skills / MCP / Subagents edits are projected onto omp's own
+  // config locations so new omp sessions pick them up.
+  const ompCapabilitySync = createOmpCapabilitySync(getHost, {
+    dataDir,
+    log: (message, data) => logger.app("plugin", "warn", message, { data }),
+  });
+  const syncingSendToRenderer = (channel: string, payload?: unknown) => {
+    sendToRenderer(channel, payload);
+    const reason = (payload as { reason?: string } | undefined)?.reason;
+    if (channel === IPC.event.pluginChanged && (reason === "mcp" || reason === "skill" || reason === "subagent")) {
+      ompCapabilitySync.schedule();
+    }
+  };
+  ompCapabilitySync.schedule(5_000);
+
   registerMcpIpc({
     registrar,
     getHost,
@@ -431,7 +447,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     currentWorkspacePath,
     refreshUserMcp,
     describeError,
-    sendToRenderer,
+    sendToRenderer: syncingSendToRenderer,
     searchMcpMarket,
   });
 
@@ -445,7 +461,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     activeUserSubagentDocuments,
     disabledBuiltinSubagents,
     stripWinLongPrefix,
-    sendToRenderer,
+    sendToRenderer: syncingSendToRenderer,
     logger,
   });
 
@@ -453,7 +469,7 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
   registerAgentImportIpc({
     registrar,
     getHost,
-    sendToRenderer,
+    sendToRenderer: syncingSendToRenderer,
     refreshUserMcp,
     currentWorkspacePath,
   });
