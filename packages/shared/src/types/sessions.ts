@@ -31,6 +31,11 @@ export type SessionSummary = {
   capabilities?: SessionCapabilities;
   /** Stable machine-readable reason why a native session cannot be continued. */
   readOnlyReason?: string;
+  /**
+   * For `pi-native` sessions: which CLI harness wrote the session file.
+   * `pi` (default when omitted) or `omp` (oh-my-pi, always read-only).
+   */
+  nativeHarness?: "pi" | "omp";
   title: string;
   /** Number of messages in the current canonical transcript. */
   messageCount: number;

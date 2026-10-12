@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
-import { NativePiSessionService } from "./native-pi-session.js";
+import { NativePiSessionService, defaultNativeAgentDir } from "./native-pi-session.js";
 import {
   acquireNativePiSessionLease,
   guardNativePiSessionManager,
@@ -49,6 +49,52 @@ function fixture(options: { newline?: boolean } = {}) {
 }
 
 describe("NativePiSessionService", () => {
+  it("lists omp (oh-my-pi) sessions read-only and never prompts, forks, or writes them", async () => {
+    const f = fixture();
+    const modelRuntimeFactory = vi.fn();
+    const service = new NativePiSessionService({
+      agentDir: f.agentDir,
+      sessionRoot: f.sessionRoot,
+      harness: "omp",
+      modelRuntimeFactory,
+    });
+    const before = readFileSync(f.file);
+    const sessions = await service.list();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      source: "pi-native",
+      nativeHarness: "omp",
+      readOnlyReason: "omp-harness",
+      capabilities: { canPrompt: false },
+    });
+    expect(modelRuntimeFactory).not.toHaveBeenCalled();
+    expect(service.has(sessions[0].id)).toBe(true);
+    const detail = service.detail(sessions[0].id);
+    expect(detail).toMatchObject({ nativeHarness: "omp", readOnlyReason: "omp-harness" });
+    expect(detail?.messages.map((message) => message.content)).toEqual(["hello", "active branch"]);
+    expect((await service.search("hello")).hits).toHaveLength(1);
+    await expect(service.prompt(sessions[0].id, "continue", () => undefined)).rejects.toMatchObject({
+      errorCode: "NATIVE_PI_OMP_HARNESS",
+    });
+    expect(() => service.fork({ id: sessions[0].id })).toThrow();
+    expect(readFileSync(f.file)).toEqual(before);
+    expect(readdirSync(join(f.sessionRoot, "--project--"))).toEqual(["fixture.jsonl"]);
+  });
+
+  it("tags pi sessions with the pi harness by default", async () => {
+    const f = fixture();
+    const service = new NativePiSessionService({ agentDir: f.agentDir, sessionRoot: f.sessionRoot });
+    const [session] = await service.list();
+    expect(session).toMatchObject({ nativeHarness: "pi" });
+    expect(session?.readOnlyReason).not.toBe("omp-harness");
+  });
+
+  it("resolves omp's agent dir separately from pi's", () => {
+    expect(defaultNativeAgentDir("omp", {})).toMatch(/[\\/]\.omp[\\/]agent$/);
+    expect(defaultNativeAgentDir("pi", { PI_DESKTOP_OMP_AGENT_DIR: "/x" })).toMatch(/[\\/]\.pi[\\/]agent$/);
+    expect(defaultNativeAgentDir("omp", { PI_DESKTOP_OMP_AGENT_DIR: "/custom/omp" })).toMatch(/custom[\\/]omp$/);
+  });
+
   it("lists and projects a native v3 tree without changing its bytes", async () => {
     const f = fixture();
     const service = new NativePiSessionService({ agentDir: f.agentDir, sessionRoot: f.sessionRoot });

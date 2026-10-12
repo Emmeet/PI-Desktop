@@ -55,11 +55,51 @@ type RuntimeMap = Map<string, DesktopAgentRuntime>;
 type NativePiServiceFactory = typeof import("./native-pi-session.js")["nativePiService"];
 let nativePiServiceFactory: NativePiServiceFactory | undefined;
 
-async function getNativePiService() {
+async function loadNativePiServiceFactory(): Promise<NativePiServiceFactory> {
   if (!nativePiServiceFactory) {
     nativePiServiceFactory = (await import("./native-pi-session.js")).nativePiService;
   }
-  return nativePiServiceFactory();
+  return nativePiServiceFactory;
+}
+
+/** omp (oh-my-pi) session discovery is on unless explicitly disabled. */
+function ompSessionsEnabled(): boolean {
+  const value = process.env.PI_DESKTOP_OMP_SESSIONS?.trim().toLowerCase();
+  return value !== "0" && value !== "false" && value !== "off";
+}
+
+async function getNativeServices() {
+  const factory = await loadNativePiServiceFactory();
+  const pi = factory({ harness: "pi" });
+  return ompSessionsEnabled() ? [pi, factory({ harness: "omp" })] : [pi];
+}
+
+/**
+ * The native service that owns `id`. Session ids are path-derived hashes, so
+ * the owning harness is whichever service discovered the id; pi stays the
+ * fallback so existing error paths (NOT_FOUND, busy, ...) are unchanged.
+ */
+async function getNativePiService(id?: string) {
+  const services = await getNativeServices();
+  return (id ? services.find((service) => service.has(id)) : undefined) ?? services[0]!;
+}
+
+async function listNativeSessions() {
+  const services = await getNativeServices();
+  const lists = await Promise.all(services.map((service) => service.list().catch(() => [])));
+  return lists.flat().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+async function searchNativeSessions(query: string) {
+  const services = await getNativeServices();
+  const [first, ...rest] = await Promise.all(services.map((service) => service.search(query)));
+  const hits = [first!, ...rest].flatMap((page) => page.hits);
+  hits.sort(
+    (left, right) =>
+      right.session.updatedAt.localeCompare(left.session.updatedAt) ||
+      left.session.id.localeCompare(right.session.id),
+  );
+  return { hits, nextOffset: null };
 }
 
 const runtimes: RuntimeMap = new Map();
@@ -388,15 +428,13 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "sidecar.health":
       return { ok: true, runtimes: runtimes.size };
     case "native.session.list": {
-      const service = await getNativePiService();
-      return { sessions: await service.list() };
+      return { sessions: await listNativeSessions() };
     }
     case "native.session.search": {
-      const service = await getNativePiService();
-      return service.search(String(params.query ?? ""));
+      return searchNativeSessions(String(params.query ?? ""));
     }
     case "native.session.get": {
-      const service = await getNativePiService();
+      const service = await getNativePiService(String(params.id ?? ""));
       return {
         session: service.detail(String(params.id ?? ""), {
           messageBefore: params.messageBefore,
@@ -407,7 +445,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       };
     }
     case "native.session.fork": {
-      const service = await getNativePiService();
+      const service = await getNativePiService(String(params.id ?? ""));
       return {
         session: service.fork({
           id: String(params.id ?? ""),
@@ -424,7 +462,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       const sessionId = String(params.sessionId);
       const content = String(params.content ?? "");
       if (sessionId.startsWith(NATIVE_PI_SESSION_PREFIX)) {
-        const service = await getNativePiService();
+        const service = await getNativePiService(sessionId);
         return service.prompt(sessionId, content, (envelope) =>
           notify("native.agent.event", envelope),
           typeof params.userMessageId === "string" ? params.userMessageId : undefined,
@@ -527,7 +565,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       const sessionId = String(params.sessionId);
       const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
       if (sessionId.startsWith(NATIVE_PI_SESSION_PREFIX)) {
-        return (await getNativePiService()).abort(sessionId, turnId);
+        return (await getNativePiService(sessionId)).abort(sessionId, turnId);
       }
       const runtime = runtimes.get(sessionId);
       if (!matchesExpectedTurnId(runtime?.getStatus().currentTurnId, turnId)) return { ok: false, aborted: false };
@@ -551,7 +589,7 @@ async function handle(method: string, params: any): Promise<unknown> {
       const sessionId = String(params.sessionId);
       const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
       if (sessionId.startsWith(NATIVE_PI_SESSION_PREFIX)) {
-        return (await getNativePiService()).abort(sessionId, turnId);
+        return (await getNativePiService(sessionId)).abort(sessionId, turnId);
       }
       const runtime = runtimes.get(sessionId);
       if (!matchesExpectedTurnId(runtime?.getStatus().currentTurnId, turnId)) {
@@ -586,7 +624,7 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "agent.getStatus": {
       const sessionId = String(params.sessionId);
       if (sessionId.startsWith(NATIVE_PI_SESSION_PREFIX)) {
-        return (await getNativePiService()).status(sessionId);
+        return (await getNativePiService(sessionId)).status(sessionId);
       }
       const runtime = runtimes.get(sessionId);
       return {
@@ -600,7 +638,7 @@ async function handle(method: string, params: any): Promise<unknown> {
     case "agent.disposeSession": {
       const sessionId = String(params.sessionId);
       if (sessionId.startsWith(NATIVE_PI_SESSION_PREFIX)) {
-        (await getNativePiService()).dispose(sessionId);
+        (await getNativePiService(sessionId)).dispose(sessionId);
         return { ok: true };
       }
       const runtime = runtimes.get(sessionId);
@@ -654,7 +692,8 @@ readNdjsonLines(process.stdin, async (line) => {
 // default for `unhandledRejection` is to exit the process. Log and carry on;
 // the affected session surfaces its own error through the normal event path.
 process.on("exit", () => {
-  nativePiServiceFactory?.().disposeAll();
+  nativePiServiceFactory?.({ harness: "pi" }).disposeAll();
+  if (ompSessionsEnabled()) nativePiServiceFactory?.({ harness: "omp" }).disposeAll();
 });
 
 process.on("unhandledRejection", (reason) => {

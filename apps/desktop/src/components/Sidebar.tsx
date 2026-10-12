@@ -1781,7 +1781,11 @@ export function Sidebar({
             <IconPin size={11} className="thread-item-pin" aria-hidden />
           ) : null}
           {session.source === "pi-native" ? (
-            <span className="thread-item-source" title="Native Pi session">Pi</span>
+            session.nativeHarness === "omp" ? (
+              <span className="thread-item-source" title="oh-my-pi (omp) session, read-only">OMP</span>
+            ) : (
+              <span className="thread-item-source" title="Native Pi session">Pi</span>
+            )
           ) : null}
           <span className="thread-item-title">{taskTitle(session.title)}</span>
           {options?.global ? (

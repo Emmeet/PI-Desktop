@@ -57,7 +57,38 @@ export type NativePiReadOnlyReason =
   | "missing-cwd"
   | "missing-trailing-newline"
   | "provider-unavailable"
-  | "project-untrusted";
+  | "project-untrusted"
+  | "omp-harness";
+
+/**
+ * Which coding-agent harness wrote a native session.
+ *
+ * - `pi`: the upstream pi CLI (`~/.pi/agent`). Sessions can be continued with
+ *   the embedded pi SDK.
+ * - `omp`: oh-my-pi (`~/.omp/agent`), a Bun-based pi fork whose session
+ *   entries, tools, auth store, and model config diverge from pi. Its sessions
+ *   are listed, searched, and viewed read-only; the embedded pi SDK never
+ *   prompts, forks, or writes into an omp session file.
+ */
+export type NativeAgentHarness = "pi" | "omp";
+
+export const NATIVE_AGENT_HARNESSES: readonly NativeAgentHarness[] = ["pi", "omp"];
+
+/**
+ * Default agent directory for a harness. `PI_DESKTOP_OMP_AGENT_DIR` overrides
+ * the omp location. `PI_CODING_AGENT_DIR` is deliberately not consulted for
+ * omp because both CLIs honor it and it would alias the two roots.
+ */
+export function defaultNativeAgentDir(
+  harness: NativeAgentHarness,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (harness === "omp") {
+    const override = env.PI_DESKTOP_OMP_AGENT_DIR?.trim();
+    return resolve(override || join(homedir(), ".omp", "agent"));
+  }
+  return resolve(join(homedir(), ".pi", "agent"));
+}
 
 type NativeSessionRecord = {
   id: string;
@@ -307,13 +338,16 @@ const NATIVE_FORK_ERROR_CODES = new Set([
 
 const nativeServices = new Map<string, NativePiSessionService>();
 
-export function nativePiService(options: { agentDir?: string; sessionRoot?: string } = {}): NativePiSessionService {
-  const agentDir = resolve(options.agentDir ?? join(homedir(), ".pi", "agent"));
+export function nativePiService(
+  options: { agentDir?: string; sessionRoot?: string; harness?: NativeAgentHarness } = {},
+): NativePiSessionService {
+  const harness = options.harness ?? "pi";
+  const agentDir = resolve(options.agentDir ?? defaultNativeAgentDir(harness));
   const sessionRoot = resolve(options.sessionRoot ?? join(agentDir, "sessions"));
-  const key = `${agentDir}\0${sessionRoot}`;
+  const key = `${harness}\0${agentDir}\0${sessionRoot}`;
   let service = nativeServices.get(key);
   if (!service) {
-    service = new NativePiSessionService({ agentDir, sessionRoot });
+    service = new NativePiSessionService({ agentDir, sessionRoot, harness });
     nativeServices.set(key, service);
   }
   return service;
@@ -461,6 +495,7 @@ class NativePiRuntime {
 export class NativePiSessionService {
   private readonly root: string;
   private readonly agentDir: string;
+  readonly harness: NativeAgentHarness;
   private readonly records = new Map<string, NativeSessionRecord>();
   private readonly runtimes = new Map<string, NativePiRuntime>();
   private readonly opening = new Set<string>();
@@ -470,9 +505,11 @@ export class NativePiSessionService {
   constructor(options: {
     agentDir?: string;
     sessionRoot?: string;
+    harness?: NativeAgentHarness;
     modelRuntimeFactory?: () => Promise<ModelRuntime>;
   } = {}) {
-    this.agentDir = resolve(options.agentDir ?? join(homedir(), ".pi", "agent"));
+    this.harness = options.harness ?? "pi";
+    this.agentDir = resolve(options.agentDir ?? defaultNativeAgentDir(this.harness));
     this.root = resolve(options.sessionRoot ?? join(this.agentDir, "sessions"));
     this.modelRuntimeFactory =
       options.modelRuntimeFactory ??
@@ -485,6 +522,11 @@ export class NativePiSessionService {
         }));
   }
 
+  /** True when this service discovered `id` in its own session root. */
+  has(id: string): boolean {
+    return this.records.has(id);
+  }
+
   async list(): Promise<SessionSummary[]> {
     let root: string;
     try {
@@ -492,7 +534,11 @@ export class NativePiSessionService {
     } catch {
       return [];
     }
-    const modelRuntime = await this.modelRuntimeFactory().catch(() => undefined);
+    // omp keeps auth/models in its own formats; never point the pi model
+    // runtime at them. omp sessions are read-only regardless.
+    const modelRuntime = this.harness === "pi"
+      ? await this.modelRuntimeFactory().catch(() => undefined)
+      : undefined;
     this.modelRuntime = modelRuntime;
     const trustStore = new ProjectTrustStore(this.agentDir);
     const summaries = await Promise.all(
@@ -537,6 +583,7 @@ export class NativePiSessionService {
             thinkingLevel: thinkingLevel(context.thinkingLevel),
             permissionMode: "inherit" as const,
             source: "pi-native" as const,
+            nativeHarness: this.harness,
             capabilities: { canPrompt: !reason, canStop: this.runtimes.get(id)?.isRunning ?? false, canRefresh: true },
             ...(reason ? { readOnlyReason: reason } : {}),
             updatedAt,
@@ -704,6 +751,7 @@ export class NativePiSessionService {
       thinkingLevel: thinkingLevel(context.thinkingLevel),
       permissionMode: "inherit",
       source: "pi-native",
+      nativeHarness: this.harness,
       capabilities: { canPrompt: !reason, canStop: this.runtimes.get(id)?.isRunning ?? false, canRefresh: true },
       ...(reason ? { readOnlyReason: reason } : {}),
       createdAt: typeof header.timestamp === "string" ? header.timestamp : new Date(snap.mtimeMs).toISOString(),
@@ -975,6 +1023,7 @@ export class NativePiSessionService {
       thinkingLevel: thinkingLevel(context.thinkingLevel),
       permissionMode: "inherit",
       source: "pi-native",
+      nativeHarness: this.harness,
       capabilities: { canPrompt: !reason, canStop: false, canRefresh: true },
       ...(reason ? { readOnlyReason: reason } : {}),
       createdAt: typeof header.timestamp === "string" ? header.timestamp : new Date(snap.mtimeMs).toISOString(),
@@ -1074,6 +1123,7 @@ export class NativePiSessionService {
     if (!snap.bytes.length || !snap.validJsonl || !header || header.type !== "session") {
       return "invalid-session";
     }
+    if (this.harness === "omp") return "omp-harness";
     if (header.version !== CURRENT_SESSION_VERSION) return "legacy-format";
     if (snap.bytes.at(-1) !== 0x0a) return "missing-trailing-newline";
     if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory()) return "missing-cwd";
