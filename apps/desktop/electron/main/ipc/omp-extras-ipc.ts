@@ -8,12 +8,14 @@
  *   stores the token where omp looks it up (url-keyed credential).
  */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { app, dialog, shell } from "electron";
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { IPC, type ComposerCommand } from "@pi-desktop/shared";
 import type { IpcRegistrar } from "./types";
+import { ompPackageDir } from "../omp-capability-sync";
 
 export const MCP_OAUTH_HELPER = `
 const pkg = process.env.OMP_PKG_DIR;
@@ -159,11 +161,75 @@ export async function runOmpMcpOAuth(url: string, onEvent: (event: OmpMcpOAuthEv
   });
 }
 
+const oneOf = (...values: string[]) => (value: unknown) => values.includes(String(value));
+const bool = (value: unknown) => typeof value === "boolean";
+const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10_000_000;
+const themeName = (value: unknown) => typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value);
+
 /** omp settings the renderer may read and change, with their allowed values. */
 const OMP_SETTINGS: Record<string, (value: unknown) => boolean> = {
-  "memory.backend": (value) => ["off", "local", "hindsight", "mnemopi", "sharpshooter"].includes(String(value)),
-  "memories.enabled": (value) => typeof value === "boolean",
+  "memory.backend": oneOf("off", "local", "hindsight", "mnemopi", "sharpshooter"),
+  "memories.enabled": bool,
+  "theme.dark": themeName,
+  "theme.light": themeName,
+  symbolPreset: oneOf("unicode", "nerd", "ascii"),
+  "composer.predictions": bool,
+  "spelling.autocomplete": oneOf("off", "auto", "ngram", "smollm"),
+  "providers.cacheWarming": oneOf("off", "streaming", "idle"),
+  "providers.anthropic.slowMode": oneOf("off", "auto"),
+  "git.enabled": bool,
+  "lsp.enabled": bool,
+  "lsp.lazy": bool,
+  "lsp.shared": bool,
+  "lsp.formatOnWrite": bool,
+  "lsp.diagnosticsOnWrite": bool,
+  "lsp.diagnosticsOnEdit": bool,
+  "lsp.diagnosticsDeduplicate": bool,
+  "commit.mapReduceEnabled": bool,
+  "commit.mapReduceThreshold": count,
+  "commit.mapBatchTokenBudget": count,
+  "commit.cacheEnabled": bool,
+  "commit.cacheTtlDays": count,
+  "commit.changelogMaxDiffChars": count,
 };
+
+/** omp's bundled TUI themes (pi-tui), with `vars` references resolved. */
+function ompThemeDir(): string | null {
+  const base = ompPackageDir();
+  if (!base) return null;
+  for (const candidate of [join(base, "..", "pi-tui", "src", "theme", "defaults"), join(base, "node_modules", "@oh-my-pi", "pi-tui", "src", "theme", "defaults")]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function ompThemeNames(): string[] {
+  const dir = ompThemeDir();
+  if (!dir) return [];
+  return readdirSync(dir).filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -5)).sort();
+}
+
+export function ompThemePalette(name: string): Record<string, string> | null {
+  const dir = ompThemeDir();
+  if (!dir || !themeName(name)) return null;
+  try {
+    const theme = JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")) as { vars?: Record<string, unknown>; colors?: Record<string, unknown> };
+    const vars = theme.vars ?? {};
+    const resolve = (value: unknown, depth = 0): string | null => {
+      if (typeof value !== "string" || !value) return null;
+      if (/^#[0-9a-f]{3,8}$/i.test(value)) return value;
+      return depth < 5 && value in vars ? resolve(vars[value], depth + 1) : null;
+    };
+    const palette: Record<string, string> = {};
+    for (const key of ["accent", "border", "borderAccent", "success", "error", "warning", "muted"]) {
+      const color = resolve(theme.colors?.[key]);
+      if (color) palette[key] = color;
+    }
+    return palette;
+  } catch {
+    return null;
+  }
+}
 
 export function registerOmpExtrasIpc({
   registrar,
@@ -173,13 +239,46 @@ export function registerOmpExtrasIpc({
   getSidecar?: () => { call<T = unknown>(method: string, params?: unknown): Promise<T> } | null | undefined;
 }): void {
   registrar.handle(IPC.invoke.ompConfigGet, async () => {
-    const { runOmpConfig } = await import("../omp-capability-sync");
+    // One `omp config list` instead of a process per key; only allow-listed
+    // keys ever leave the main process (the list also holds auth settings).
+    const { runOmp } = await import("../omp-capability-sync");
+    const listed = JSON.parse(await runOmp(["config", "list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
     const values: Record<string, unknown> = {};
     for (const key of Object.keys(OMP_SETTINGS)) {
-      const raw = (await runOmpConfig(["get", key]).catch(() => "")).trim();
-      values[key] = raw === "true" ? true : raw === "false" ? false : raw;
+      if (listed[key] && "value" in listed[key]) values[key] = listed[key].value;
     }
     return { values };
+  });
+
+  registrar.handle(IPC.invoke.ompThemes, async () => {
+    const names = ompThemeNames();
+    const palettes: Record<string, Record<string, string>> = {};
+    for (const name of names) {
+      const palette = ompThemePalette(name);
+      if (palette) palettes[name] = palette;
+    }
+    return { names, palettes };
+  });
+
+  registrar.handleWithEvent(IPC.invoke.ompExportHtml, async (event, input: { sessionId?: string; title?: string } = {}) => {
+    registrar.assertMainWindowSender(event);
+    const sessionId = String(input?.sessionId ?? "");
+    if (!sessionId) throw Object.assign(new Error("sessionId is required"), { errorCode: "INVALID_ARGUMENT" });
+    const safe = String(input?.title ?? "omp-session").replace(/[\\/:*?"<>|\n\r]+/g, " ").trim().slice(0, 80) || "omp-session";
+    const choice = await dialog.showSaveDialog({
+      defaultPath: join(app.getPath("downloads"), `${safe}.html`),
+      filters: [{ name: "HTML", extensions: ["html"] }],
+    });
+    if (choice.canceled || !choice.filePath) return { path: null };
+    const sidecar = getSidecar?.();
+    if (!sidecar) throw new Error("agent sidecar unavailable");
+    const reply = await sidecar.call<{ result?: { path?: string } }>("omp.session.command", {
+      sessionId,
+      command: { type: "export_html", outputPath: choice.filePath },
+    });
+    const path = reply?.result?.path ?? choice.filePath;
+    shell.showItemInFolder(path);
+    return { path };
   });
 
   registrar.handle(IPC.invoke.ompConfigSet, async (input: { key?: string; value?: unknown } = {}) => {

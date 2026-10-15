@@ -50,6 +50,9 @@ import {
 } from "../icons";
 import { TooltipButton, cx } from "../ui";
 
+/** How long the in-menu remove confirm stays armed while its menu is open. */
+const MCP_MENU_ARMED_MS = 15_000;
+
 const GLOBAL_MCP_PATH = "~/.agents/servers";
 
 function projectMcpPath(projectPath: string | null): string {
@@ -131,7 +134,10 @@ export function AgentMcpPage() {
     };
   }, []);
   const [view, setView] = useState<"servers" | "market">("servers");
-  const { armed, setArmed } = useArmedDelete();
+  // The remove confirm lives inside the row menu, and closing that menu
+  // already disarms it; a short self-expiry flipped the label back to "Remove"
+  // under the pointer, so a deliberate second click only re-armed it.
+  const { armed, setArmed } = useArmedDelete(MCP_MENU_ARMED_MS);
 
   const rowKey = (level: AgentCapabilityLevel, id: string) => `${level}:${id}`;
   const levelQuery = (level: AgentCapabilityLevel) => ({

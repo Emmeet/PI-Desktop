@@ -652,6 +652,13 @@ export const api = {
     invoke<{ ok: boolean }>(IPC.invoke.ompConfigSet, { key, value }),
   ompUsageStats: () =>
     invoke<OmpUsageStats>(IPC.invoke.ompUsageStats, {}),
+  ompThemes: () =>
+    invoke<{ names: string[]; palettes: Record<string, Record<string, string>> }>(IPC.invoke.ompThemes, {}),
+  ompExportHtml: (input: { sessionId: string; title?: string }) =>
+    invoke<{ path: string | null }>(IPC.invoke.ompExportHtml, input),
+  /** One allow-listed omp RPC command for a session (export_html, goal, btw, …). */
+  ompSessionCommand: <T = unknown>(sessionId: string | undefined, command: Record<string, unknown> & { type: string }) =>
+    invoke<{ result: T }>(IPC.invoke.ompCall, { method: "omp.session.command", params: { sessionId, command } }).then((reply) => reply.result),
   ompRevertEdit: (input: { path: string; oldText: string; newText: string }) =>
     invoke<{ ok: boolean; alreadyReverted?: boolean }>(IPC.invoke.ompRevertEdit, input),
   onOmpEvent: (listener: (event: { method: string; params: any }) => void) => {

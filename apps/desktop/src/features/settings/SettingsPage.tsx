@@ -38,6 +38,7 @@ import { Badge, Button, cx, SegmentedControl, SettingsToggle } from "../../compo
 import { OmpRolesPage } from "./OmpRolesPage";
 import { OmpApprovalSection } from "./OmpApprovalSection";
 import { OmpAccountsSection } from "./OmpAccountsSection";
+import { OmpPreferencesPage } from "./OmpPreferencesPage";
 import { OmpMemorySection } from "./OmpMemorySection";
 import { OmpUsagePage } from "./OmpUsagePage";
 import { KeyboardShortcutsSection } from "../../components/settings/KeyboardShortcutsSection";
@@ -249,6 +250,7 @@ export function SettingsPage() {
       remoteHosts: <IconGlobe size={14} />,
       voice: <IconMic size={14} />,
       accounts: <IconKey size={14} />,
+      ompPrefs: <IconPalette size={14} />,
       usage: <IconActivity size={14} />,
       about: <IconInfo size={14} />,
     };
@@ -571,6 +573,8 @@ export function SettingsPage() {
           )}
 
           {tab === "accounts" && <OmpAccountsSection />}
+
+          {tab === "ompPrefs" && <OmpPreferencesPage />}
 
           {tab === "usage" && <OmpUsagePage />}
 

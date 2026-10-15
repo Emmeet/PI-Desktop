@@ -107,6 +107,7 @@ export type SessionIpcDependencies = {
 /** omp sidecar methods the renderer may call directly. */
 const OMP_RENDERER_CALLS = new Set([
   "omp.subagents.list",
+  "omp.session.command",
   "omp.subagents.cancel",
   "omp.subagents.steer",
   "omp.subagents.messages",

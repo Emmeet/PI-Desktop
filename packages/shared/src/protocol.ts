@@ -149,6 +149,8 @@ export const IPC = {
     ompConfigSet: "pi-desktop/omp/config/set",
     /** Undo one omp edit by restoring its old text (only while the file is unchanged since). */
     ompRevertEdit: "pi-desktop/omp/edit/revert",
+    ompThemes: "pi-desktop/omp/themes",
+    ompExportHtml: "pi-desktop/omp/export-html",
     sessionFork: "pi-desktop/session/fork",
     sessionMoveProject: "pi-desktop/session/moveProject",
     sessionSearch: "pi-desktop/session/search",

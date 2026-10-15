@@ -1,3 +1,5 @@
+import { OmpLoopDock } from "../features/omp/OmpSessionActions";
+import { OmpWordPrediction } from "../features/omp/OmpWordPrediction";
 import { inheritedSessionModelBinding } from "../lib/session-model";
 import { OmpSubagentDock } from "../features/omp/OmpSubagentDock";
 import { loadCatalog as loadOmpCatalog } from "../features/chat/composer/OmpModelPicker";
@@ -551,6 +553,8 @@ export function Composer({
     >
       <div className="composer-stack">
         {activeSessionId ? <OmpSubagentDock sessionId={activeSessionId} /> : null}
+        {activeSessionId ? <OmpLoopDock sessionId={activeSessionId} /> : null}
+        {activeSessionId?.startsWith("native-pi:") ? <OmpWordPrediction editorRef={ref} value={value} cursor={cursor} /> : null}
         {activeSessionId ? <TodoDock sessionId={activeSessionId} /> : null}
         {planCheckpoint?.status === "pending" ? (
           <PlanApprovalBar proposal={planCheckpoint} />

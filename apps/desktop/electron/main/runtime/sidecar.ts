@@ -1,3 +1,4 @@
+import { handleOmpHostRequest } from "../omp-host-tools";
 import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
 import {
   findSubagentProviderSource,
@@ -240,7 +241,11 @@ export function createSidecarRuntime({
       if (message) sendToRenderer(IPC.event.toast, { message: `omp: ${message}` });
       return;
     }
-    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed") {
+    if (method === "native.host.request") {
+      void handleOmpHostRequest(s, params as Parameters<typeof handleOmpHostRequest>[1]).catch(() => undefined);
+      return;
+    }
+    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed" || method === "native.btw") {
       sendToRenderer(IPC.event.ompEvent, { method, params });
       return;
     }

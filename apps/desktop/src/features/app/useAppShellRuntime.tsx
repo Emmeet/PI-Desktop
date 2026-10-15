@@ -33,6 +33,7 @@ import { useSidebarTransition } from "./useSidebarTransition";
 import { useStartupWatchdog } from "./useStartupWatchdog";
 import { useTraySessions } from "./useTraySessions";
 import { runLiveVoiceShortcut } from "../voice/live/live-voice-shortcuts";
+import { isOmpShortcut, runOmpShortcut } from "../omp/OmpHotkeys";
 
 const MODIFIER_ONLY_KEYS = new Set([
   "Alt",
@@ -762,6 +763,10 @@ export function useAppShellRuntime() {
       }
       if (shortcut.id === "voiceToggle" || shortcut.id === "voiceCancel") {
         if (runLiveVoiceShortcut(shortcut.id)) e.preventDefault();
+        return;
+      }
+      if (isOmpShortcut(shortcut.id)) {
+        if (runOmpShortcut(shortcut.id, e.target)) e.preventDefault();
         return;
       }
       e.preventDefault();

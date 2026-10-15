@@ -93,5 +93,6 @@ export function rpcTimeoutMs(
   if (method === "tools.execute") return undefined;
   // OAuth logins wait on the user in a browser.
   if (method === "omp.login.start") return 11 * 60_000;
+  if (method === "omp.session.command") return 11 * 60_000;
   return DEFAULT_RPC_TIMEOUT_MS;
 }

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ContextCompactionRecord, UiMessage } from "@pi-desktop/shared";
+import { mergeOmpCommandOutputs, readOmpCommandOutputs } from "./command-output-store.js";
 
 /** Parsed view of one omp session file (`~/.omp/agent/sessions/<cwd>/<ts>_<id>.jsonl`). */
 export type OmpSessionFile = {
@@ -116,7 +117,11 @@ export function projectMessage(
   return undefined;
 }
 
-export function parseOmpSession(path: string, text = readFileSync(path, "utf8")): OmpSessionFile | undefined {
+export function parseOmpSession(
+  path: string,
+  text = readFileSync(path, "utf8"),
+  options: { commandOutputs?: boolean } = {},
+): OmpSessionFile | undefined {
   const entries: Entry[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -198,7 +203,7 @@ export function parseOmpSession(path: string, text = readFileSync(path, "utf8"))
     ...model,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(fast !== undefined ? { fast } : {}),
-    messages,
+    messages: options.commandOutputs === false ? messages : mergeOmpCommandOutputs(messages, readOmpCommandOutputs(header.id)),
     compactions,
   };
 }

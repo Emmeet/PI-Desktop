@@ -1,3 +1,4 @@
+import { OmpSessionActionsButton } from "../features/omp/OmpSessionActions";
 import { OmpBranchTreeButton } from "../features/omp/OmpBranchTree";
 import {
   KEYBOARD_SHORTCUTS,
@@ -162,6 +163,7 @@ export function ConversationTopbar({
       <div className="ct-right">
         <div className="ct-actions">
           <OmpBranchTreeButton />
+          <OmpSessionActionsButton />
           <TooltipButton
             type="button"
             className="ct-icon-btn"

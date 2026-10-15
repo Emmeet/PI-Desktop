@@ -28,6 +28,7 @@ import {
   type OmpPreferences,
 } from "./preferences.js";
 import { OmpRpcProcess, type OmpFrame } from "./rpc-process.js";
+import { commandOutputMessage, recordOmpCommandOutput } from "./command-output-store.js";
 import { listOmpSessionFiles, parseOmpSession, projectMessage, textOf, type OmpSessionFile } from "./session-store.js";
 
 export type OmpSubagentView = {
@@ -238,6 +239,7 @@ class OmpSessionRuntime {
   private promptRequestId?: string;
   private userMessageId?: string;
   private lastPromptUserId?: string;
+  private lastPromptText = "";
   onTurnSettled?: (optimisticUserId: string | undefined) => void;
   private currentAssistant?: UiMessage;
   private readonly toolArgs = new Map<string, unknown>();
@@ -309,6 +311,11 @@ class OmpSessionRuntime {
       void rpc.request({ type: "set_ask_dialog", enabled: true }).catch(() => undefined);
       // Live subagent lifecycle + aggregated progress (not every inner event).
       void rpc.request({ type: "set_subagent_subscription", level: "progress" }).catch(() => undefined);
+      // Desktop-side tools (screenshot, open file, clipboard) run in the app.
+      if (process.env.PI_DESKTOP_OMP_HOST_TOOLS !== "0") {
+        void rpc.request({ type: "set_host_tools", tools: OMP_HOST_TOOLS }).catch(() => undefined);
+        void rpc.request({ type: "set_host_uri_schemes", schemes: OMP_HOST_URI_SCHEMES }).catch(() => undefined);
+      }
       await runtime.refreshSessionFile();
     } catch (error) {
       rpc.dispose();
@@ -339,6 +346,24 @@ class OmpSessionRuntime {
     }
   }
 
+  /** Keep slash-command output (which omp never writes to the session file) for reloads. */
+  private persistCommandOutput(id: string, command: string, output: string, createdAt: string): void {
+    if (!command.trim().startsWith("/")) return;
+    void this.refreshSessionFile()
+      .catch(() => undefined)
+      .then(() => {
+        if (!this.sessionFile) return;
+        const file = parseOmpSession(this.sessionFile, undefined, { commandOutputs: false });
+        if (!file) return;
+        recordOmpCommandOutput(file.sessionId, { id, anchor: file.messages.at(-1)?.id ?? "", command: command.trim(), output, createdAt });
+      })
+      .catch(() => undefined);
+  }
+
+  sendRaw(frame: Record<string, unknown>): void {
+    this.rpc.send(frame);
+  }
+
   request<T = any>(command: Record<string, unknown> & { type: string }, timeoutMs?: number): Promise<T> {
     return this.rpc.request<T>(command, timeoutMs);
   }
@@ -367,6 +392,7 @@ class OmpSessionRuntime {
     this.turnId = turnId;
     this.userMessageId = userMessageId;
     this.lastPromptUserId = userMessageId;
+    this.lastPromptText = content;
     this.promptRequestId = this.rpc.nextId("prompt");
     this.emit({ type: "agent_start" });
     this.emitStatus();
@@ -500,6 +526,16 @@ class OmpSessionRuntime {
       const id = String(payload.id ?? "");
       if (!id) return;
       const status = payload.status === "started" ? "running" : String(payload.status ?? "running");
+      // omp sometimes aborts a just-spawned subagent and restarts it under a
+      // new id ("Name" -> "Name-2") for the same task call; drop the stub.
+      if (payload.status === "started" && payload.parentToolCallId) {
+        for (const [otherId, other] of this.subagents) {
+          if (otherId !== id && other.parentToolCallId === String(payload.parentToolCallId)
+            && other.index === (Number(payload.index) || 0) && other.status === "aborted" && !other.toolCount) {
+            this.subagents.delete(otherId);
+          }
+        }
+      }
       this.applySubagent(id, {
         index: Number(payload.index) || 0,
         agent: String(payload.agent ?? "task"),
@@ -760,14 +796,10 @@ class OmpSessionRuntime {
           this.side("native.notice", { sessionId: this.id, level: "info", message: text.slice(0, 400) });
           return;
         }
-        const message: UiMessage = {
-          id: `omp-command:${randomUUID()}`,
-          role: "assistant",
-          content: "```text\n" + text.replace(/```/g, "ʼʼʼ") + "\n```",
-          createdAt: new Date().toISOString(),
-          status: "complete",
-        };
-        this.emit({ type: "message_end", message });
+        const recordId = randomUUID();
+        const createdAt = new Date().toISOString();
+        this.emit({ type: "message_end", message: commandOutputMessage(`omp-command:${recordId}`, text, createdAt) });
+        this.persistCommandOutput(recordId, this.lastPromptText, text, createdAt);
         return;
       }
       case "extension_ui_request":
@@ -836,6 +868,16 @@ class OmpSessionRuntime {
       case "available_commands_update":
         this.commands = Array.isArray(frame.commands) ? frame.commands : [];
         this.side("native.commands.changed", { sessionId: this.id });
+        return;
+      case "btw_delta":
+      case "btw_record":
+        this.side("native.btw", { sessionId: this.id, frame });
+        return;
+      case "host_tool_call":
+      case "host_tool_cancel":
+      case "host_uri_request":
+      case "host_uri_cancel":
+        this.side("native.host.request", { sessionId: this.id, frame });
         return;
     }
     if (!this.turnId) return;
@@ -929,6 +971,37 @@ class OmpSessionRuntime {
  * drives each conversation through a dedicated `omp --mode rpc` process.
  * omp handles models (models.yml), credentials, tools, and persistence.
  */
+/** Tools the desktop app executes for omp (`set_host_tools`); see main's omp-host-tools. */
+export const OMP_HOST_TOOLS = [
+  {
+    name: "desktop_screenshot",
+    label: "Desktop screenshot",
+    description: "Capture a screenshot of the user's screen (primary display) and return it as an image.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "desktop_open",
+    label: "Open in desktop app",
+    description: "Open a file, folder or http(s) URL with the user's default desktop application.",
+    parameters: { type: "object", properties: { target: { type: "string", description: "Absolute path or http(s) URL" } }, required: ["target"], additionalProperties: false },
+  },
+  {
+    name: "desktop_clipboard_read",
+    label: "Read clipboard",
+    description: "Read the text currently on the user's clipboard.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "desktop_clipboard_write",
+    label: "Write clipboard",
+    description: "Put text on the user's clipboard.",
+    parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false },
+  },
+];
+export const OMP_HOST_URI_SCHEMES = [
+  { scheme: "clipboard", description: "The desktop clipboard as text (clipboard://text)", writable: true },
+];
+
 export class OmpSessionService {
   readonly agentDir: string;
   private readonly root: string;
@@ -1709,6 +1782,39 @@ export class OmpSessionService {
 
   async sessionStats(id: string): Promise<Record<string, unknown>> {
     return this.sessionRequest<Record<string, unknown>>(id, { type: "get_session_stats" });
+  }
+
+  /** The app's answer to a host tool / URI request (see `native.host.request`). */
+  hostRespond(id: string, frame: Record<string, unknown> & { type: string }): void {
+    if (!["host_tool_result", "host_tool_update", "host_uri_result"].includes(frame.type)) {
+      throw Object.assign(new Error(`not a host reply: ${frame.type}`), { errorCode: "INVALID_ARGUMENT" });
+    }
+    const runtime = this.runtimes.get(id);
+    if (!runtime?.alive) return;
+    runtime.sendRaw(frame);
+  }
+
+  /** omp RPC commands the desktop drives directly for one session (or the utility process). */
+  static readonly SESSION_COMMANDS = new Set([
+    "export_html", "goal", "handoff", "btw", "btw_cancel", "get_btw_history",
+    "set_slow_mode", "set_cache_warming", "predict_word", "predict_word_feedback",
+  ]);
+
+  async sessionCommand(id: string | undefined, command: Record<string, unknown> & { type: string }): Promise<unknown> {
+    if (!OmpSessionService.SESSION_COMMANDS.has(command.type)) {
+      throw Object.assign(new Error(`omp command not allowed: ${command.type}`), { errorCode: "INVALID_ARGUMENT" });
+    }
+    // Word prediction is local (n-gram) and needs no chat.
+    if (!id || command.type === "predict_word" || command.type === "predict_word_feedback") {
+      return (await this.utilityReady()).request(command, 30_000);
+    }
+    if (command.type === "handoff" && this.runtimes.get(id)?.isRunning) {
+      throw Object.assign(new Error("Cannot hand off while a response is in progress"), { errorCode: "AGENT_BUSY" });
+    }
+    const long = command.type === "handoff" || command.type === "btw" || command.type === "export_html";
+    const runtime = this.runtimes.get(id);
+    if (runtime?.alive) return runtime.request(command, long ? 10 * 60_000 : 60_000);
+    return this.withSessionProcess(this.record(id), (rpc) => rpc.request(command, long ? 10 * 60_000 : 60_000));
   }
 
   // ---- Utility process (login, commands without a chat) ------------------
