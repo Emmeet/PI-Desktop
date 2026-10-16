@@ -122,6 +122,8 @@ export type QueuedTurnSummary = {
   userMessageId?: string;
   voiceOrigin?: VoiceOrigin;
   attachments?: AgentPromptAttachment[];
+  /** OMP lost acknowledgement; retained for review/removal, never automatically resent. */
+  deliveryStatus?: "uncertain";
   position: number;
   /** Set only for promoted entries; entries arrive in delivery order. */
   priority?: number;

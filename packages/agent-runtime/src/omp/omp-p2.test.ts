@@ -8,6 +8,7 @@ import { OmpSessionService, type OmpSideChannel } from "./service.js";
 // Protocol fixture performs state transitions and journal writes. Assertions below
 // exercise the production public service and actual spawned JSONL transport.
 const ENGINE = String.raw`#!/usr/bin/env node
+if (process.argv.includes("--version")) { process.stdout.write("18.10.0\n"); process.exit(0); }
 const fs = require("node:fs");
 const path = require("node:path");
 if (process.argv[2] === "config") { process.stdout.write(JSON.stringify({ value: {} })); process.exit(0); }

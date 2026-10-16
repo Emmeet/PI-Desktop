@@ -82,6 +82,7 @@ export function createQueueSlice({
       id: entry.id,
       sessionId: entry.sessionId,
       content: entry.content,
+      ...(entry.deliveryStatus ? { deliveryStatus: entry.deliveryStatus } : {}),
       draft: queuedDrafts.get(entry.id) ?? {
         text: entry.content,
         fileReferences: (entry.attachments ?? []).map((attachment) => {
@@ -227,7 +228,7 @@ export function createQueueSlice({
         sessionId,
         promptId,
       );
-      if (!item || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
+      if (!item || item.deliveryStatus === "uncertain" || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
         return;
       }
       // `item.content` is token-stripped; the row's captured draft is the text
@@ -252,7 +253,7 @@ export function createQueueSlice({
         sessionId,
         promptId,
       );
-      if (!item || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
+      if (!item || item.deliveryStatus === "uncertain" || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
         return;
       }
       const before = get().queuedPrompts;
@@ -284,7 +285,7 @@ export function createQueueSlice({
         sessionId,
         promptId,
       );
-      if (!item || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
+      if (!item || item.deliveryStatus === "uncertain" || isPendingQueuedPrompt(item) || isPromotedQueuedPrompt(item)) {
         return;
       }
       set((state) => ({

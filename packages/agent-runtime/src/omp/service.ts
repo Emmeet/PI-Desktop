@@ -17,6 +17,7 @@ import type {
   SessionSummary,
   UiMessage,
 } from "@pi-desktop/shared";
+import { normalizeOmpApprovalMode, type OmpApprovalMode } from "@pi-desktop/shared";
 import { NATIVE_PI_SESSION_PREFIX } from "../native-pi-session-id.js";
 import { listOmpRoles } from "./roles.js";
 import { resolveOmpBinary } from "./binary.js";
@@ -244,6 +245,26 @@ function searchExcerpt(text: string, query: string, budget = 180): string {
   return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
 }
 
+type QueuedInsertion = { queue: "steering" | "followUp"; message: string; images?: unknown[]; deliveryStatus?: "uncertain" };
+
+type OmpRuntimeInput = {
+  id: string;
+  cwd: string;
+  sessionPath?: string;
+  model?: OmpModelRef;
+  thinkingLevel?: string;
+  agentDir: string;
+  planMode?: boolean;
+  approvalMode: () => OmpApprovalMode;
+  reconnectDelays: readonly number[];
+  side?: OmpSideChannel;
+  notify: OmpNotifier;
+  onSessionFile: (path: string) => void;
+  onExit: () => void;
+  record: SessionRecord;
+  onCreated: (runtime: OmpSessionRuntime) => void;
+};
+
 /** One live omp process bound to one session. */
 class OmpSessionRuntime {
   private turnId?: string;
@@ -274,79 +295,202 @@ class OmpSessionRuntime {
   private readonly pendingSubagents = new Map<string, OmpFrame[]>();
   private activeCommands = 0;
   recycleWhenSettled = false;
+  private disposed = false;
+  private initialized = false;
+  private connecting = false;
+  private generation = 0;
+  private recovery?: Promise<void>;
+  private recoveryError?: Error;
+  private recoveryCancelled = false;
+  private recoveryAttempt = 0;
+  private recoveryTimer?: NodeJS.Timeout;
+  private recoveryResetTimer?: NodeJS.Timeout;
+  private cancelRecoveryDelay?: () => void;
+  private recoveryTurnId?: string;
+  private readonly recoveryQueue: QueuedInsertion[] = [];
+  private readonly queuedImages = new Map<string, unknown[]>();
+  private insertionTail: Promise<void> = Promise.resolve();
 
   private constructor(
     readonly id: string,
     readonly planMode: boolean,
-    private readonly rpc: OmpRpcProcess,
+    private rpc: OmpRpcProcess,
     private notify: OmpNotifier,
     private readonly onSessionFile: (path: string) => void,
     private readonly onExit: () => void,
     private readonly record: SessionRecord,
+    private readonly launch: () => OmpRpcProcess,
+    private readonly reconnectDelays: readonly number[],
   ) {
-    rpc.onFrame((frame) => this.onFrame(frame));
+    this.bind(rpc);
+  }
+
+  private bind(rpc: OmpRpcProcess): void {
+    const generation = ++this.generation;
+    rpc.onFrame((frame) => {
+      if (!this.disposed && generation === this.generation) this.onFrame(frame);
+    });
     rpc.onExit((reason) => {
+      if (this.disposed || generation !== this.generation || !this.initialized || this.connecting) return;
+      clearTimeout(this.recoveryResetTimer);
       this.closeHost();
       this.stopLoop();
       this.clearPendingUi();
-      if (this.queue.steering.length || this.queue.followUp.length) this.applyQueue({ steering: [], followUp: [] });
       if (this.turnId) {
-        this.emit({ type: "error", error: { code: "OMP_PROCESS_EXITED", message: reason, retriable: true } });
+        this.recoveryTurnId = this.turnId;
+        this.emit({ type: "error", error: { code: "OMP_DELIVERY_UNCERTAIN", message: `${reason}. The interrupted message may have executed and will not be sent again. Queued messages will reconnect automatically.`, retriable: false } });
         this.finish();
       }
-      this.onExit();
+      this.captureQueue();
+      if (!this.recovery) void this.reconnect().catch(() => undefined);
     });
   }
 
-  static async start(input: {
-    id: string;
-    cwd: string;
-    sessionPath?: string;
-    model?: OmpModelRef;
-    thinkingLevel?: string;
-    agentDir: string;
-    planMode?: boolean;
-    side?: OmpSideChannel;
-    notify: OmpNotifier;
-    onSessionFile: (path: string) => void;
-    onExit: () => void;
-    record: SessionRecord;
-  }): Promise<OmpSessionRuntime> {
-    const binary = resolveOmpBinary();
-    const args = ["--cwd", input.cwd];
-    // Plan mode: every non-read tool must ask, and the runtime denies those.
-    if (input.planMode) args.push("--approval-mode", "always-ask", "--append-system-prompt", OMP_PLAN_MODE_PROMPT);
-    if (input.sessionPath) args.push("--resume", input.sessionPath);
-    if (input.model) args.push("--model", `${input.model.provider}/${input.model.modelId}`);
-    if (input.thinkingLevel) args.push("--thinking", input.thinkingLevel);
-    const env = { ...process.env };
-    // Keep the child on the same agent dir the app lists sessions from.
-    if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = input.agentDir;
-    const rpc = new OmpRpcProcess(binary, args, { cwd: input.cwd, env, mode: "rpc-ui" });
-    const runtime = new OmpSessionRuntime(input.id, input.planMode === true, rpc, input.notify, input.onSessionFile, input.onExit, input.record);
+  static async start(input: OmpRuntimeInput): Promise<OmpSessionRuntime> {
+    const launch = () => {
+      const args = ["--cwd", input.cwd, "--approval-mode", input.planMode ? "always-ask" : input.approvalMode()];
+      if (input.planMode) args.push("--append-system-prompt", OMP_PLAN_MODE_PROMPT);
+      const path = input.record.path ?? input.sessionPath;
+      if (path) args.push("--resume", path);
+      const model = input.record.model ?? input.model;
+      if (model) args.push("--model", `${model.provider}/${model.modelId}`);
+      const thinking = input.record.thinkingLevel ?? input.thinkingLevel;
+      if (thinking) args.push("--thinking", thinking);
+      const env = { ...process.env };
+      if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = input.agentDir;
+      return new OmpRpcProcess(resolveOmpBinary(), args, { cwd: input.cwd, env, mode: "rpc-ui" });
+    };
+    const rpc = launch();
+    const runtime = new OmpSessionRuntime(input.id, input.planMode === true, rpc, input.notify, input.onSessionFile, input.onExit, input.record, launch, input.reconnectDelays);
+    input.onCreated(runtime);
     if (input.side) runtime.side = input.side;
     try {
-      await Promise.race([
-        rpc.ready,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
-      ]);
-      // Route omp's ask tool to the desktop's ask card.
-      await rpc.request({ type: "set_ask_dialog", enabled: true });
-      // Live subagent lifecycle + aggregated progress (not every inner event).
-      await rpc.request({ type: "set_subagent_subscription", level: "progress" });
-      // Desktop-side tools (screenshot, open file, clipboard) run in the app.
-      if (process.env.PI_DESKTOP_OMP_HOST_TOOLS !== "0") {
-        await rpc.request({ type: "set_host_tools", tools: OMP_HOST_TOOLS });
-        await rpc.request({ type: "set_host_uri_schemes", schemes: OMP_HOST_URI_SCHEMES });
-      }
-      await runtime.refreshSessionFile();
+      await runtime.initialize(rpc);
+      runtime.initialized = true;
+      return runtime;
     } catch (error) {
-      rpc.dispose();
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
-        errorCode: (error as any)?.errorCode ?? "OMP_START_FAILED",
-      });
+      runtime.dispose();
+      const errorCode = error && typeof error === "object" && "errorCode" in error ? error.errorCode : "OMP_START_FAILED";
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { errorCode });
     }
-    return runtime;
+  }
+
+  private async initialize(rpc: OmpRpcProcess): Promise<void> {
+    await rpc.ready;
+    this.ensureCurrent(rpc);
+    await rpc.request({ type: "set_ask_dialog", enabled: true });
+    await rpc.request({ type: "set_subagent_subscription", level: "progress" });
+    if (process.env.PI_DESKTOP_OMP_HOST_TOOLS !== "0") {
+      await rpc.request({ type: "set_host_tools", tools: OMP_HOST_TOOLS });
+      await rpc.request({ type: "set_host_uri_schemes", schemes: OMP_HOST_URI_SCHEMES });
+    }
+    if (this.record.fast !== undefined) await rpc.request({ type: "set_fast_mode", enabled: this.record.fast });
+    await this.refreshSessionFile();
+    this.ensureCurrent(rpc);
+  }
+
+  private ensureCurrent(rpc: OmpRpcProcess): void {
+    if (this.disposed || this.rpc !== rpc || !rpc.isAlive) throw Object.assign(new Error("OMP connection was cancelled or closed"), { errorCode: "OMP_PROCESS_EXITED" });
+  }
+
+  private captureQueue(): void {
+    const queued = (["steering", "followUp"] as const).flatMap((queue) => this.queue[queue].map((message) => ({ queue, message, images: this.queuedImages.get(ompQueueEntryId(queue, message)) })));
+    this.recoveryQueue.unshift(...queued);
+    this.queue = { steering: [], followUp: [] };
+    this.publishQueue();
+  }
+
+  private recoveryNotice(state: "retrying" | "connected" | "failed", delayMs?: number): void {
+    this.side("native.recovery", { sessionId: this.id, state, attempt: this.recoveryAttempt, maxAttempts: this.reconnectDelays.length, delayMs, queued: this.queueEntries().length });
+    const code = state === "retrying" ? "OMP_RECONNECTING" : state === "connected" ? "OMP_RECONNECTED" : "OMP_RECOVERY_FAILED";
+    this.side("native.notice", { sessionId: this.id, code, level: state === "failed" ? "error" : "info", attempt: this.recoveryAttempt, maxAttempts: this.reconnectDelays.length, delayMs });
+  }
+
+  private reconnect(): Promise<void> {
+    if (this.recovery) return this.recovery;
+    this.recoveryError = undefined;
+    this.recovery = this.runReconnect().finally(() => { this.recovery = undefined; });
+    return this.recovery;
+  }
+
+  private async runReconnect(): Promise<void> {
+    while (!this.disposed && !this.recoveryCancelled && this.recoveryAttempt < this.reconnectDelays.length) {
+      const delay = this.reconnectDelays[this.recoveryAttempt++]!;
+      this.recoveryNotice("retrying", delay);
+      await new Promise<void>((resolve) => {
+        this.cancelRecoveryDelay = resolve;
+        this.recoveryTimer = setTimeout(resolve, delay);
+        this.recoveryTimer.unref?.();
+      });
+      this.cancelRecoveryDelay = undefined;
+      this.recoveryTimer = undefined;
+      if (this.disposed || this.recoveryCancelled) return;
+      this.connecting = true;
+      try {
+        if (!this.record.path || !existsSync(this.record.path)) throw new Error("The interrupted OMP session has no saved resume identity");
+        const rpc = this.launch();
+        this.rpc = rpc;
+        this.bind(rpc);
+        await this.initialize(rpc);
+        this.hostClosed = false;
+        let index: number;
+        while (!this.disposed && (index = this.recoveryQueue.findIndex((entry) => !entry.deliveryStatus)) >= 0) {
+          const entry = this.recoveryQueue.splice(index, 1)[0]!;
+          this.publishQueue();
+          // Once written, this delivery is uncertain until OMP publishes its
+          // queue/message events. Never put an unacknowledged send back in line.
+          try {
+            if (!this.isRunning) await this.prompt(entry.message, randomUUID(), undefined, entry.images ?? []);
+            // The old turn no longer exists. Drain its preserved insertions FIFO
+            // instead of allowing new steering priority to overtake follow-ups.
+            else await rpc.request({ type: "follow_up", message: entry.message, ...(entry.images?.length ? { images: entry.images } : {}) });
+          } catch (error) {
+            if (!this.queue[entry.queue].includes(entry.message)) this.recoveryQueue.unshift({ ...entry, deliveryStatus: "uncertain" });
+            this.publishQueue();
+            this.side("native.notice", { sessionId: this.id, level: "error", code: "OMP_DELIVERY_UNCERTAIN" });
+            throw error;
+          }
+          this.ensureCurrent(rpc);
+        }
+        this.ensureCurrent(rpc);
+        clearTimeout(this.recoveryResetTimer);
+        // A stable connection or completed turn begins a new retry budget;
+        // immediately crashing replacements still share the bounded budget.
+        this.recoveryResetTimer = setTimeout(() => { this.recoveryAttempt = 0; }, 30_000);
+        this.recoveryResetTimer.unref?.();
+        this.recoveryNotice("connected");
+        return;
+      } catch {
+        if (this.turnId) {
+          this.emit({ type: "error", error: { code: "OMP_DELIVERY_UNCERTAIN", message: "OMP exited while delivering a queued message. It will not be retried.", retriable: false } });
+          this.finish();
+        }
+        this.captureQueue();
+        this.rpc.dispose();
+      } finally {
+        this.connecting = false;
+      }
+    }
+    if (!this.disposed && !this.recoveryCancelled) {
+      this.recoveryError = Object.assign(new Error("OMP could not reconnect. Queued messages are preserved; send a new message to retry."), { errorCode: "OMP_RECOVERY_FAILED" });
+      this.recoveryNotice("failed");
+      this.emit({ type: "error", error: { code: "OMP_RECOVERY_FAILED", message: this.recoveryError.message, retriable: true } });
+      throw this.recoveryError;
+    }
+  }
+
+  async readyForPrompt(): Promise<void> {
+    if (this.recovery) await this.recovery.catch((error: unknown) => { if (!this.recoveryError) throw error; });
+    if (this.recoveryError) {
+      this.recoveryAttempt = 0;
+      this.recoveryCancelled = false;
+      await this.reconnect();
+    }
+    this.ensureCurrent(this.rpc);
+  }
+
+  get canQueue(): boolean {
+    return !this.disposed && (this.isRunning || this.recovery !== undefined || this.recoveryError !== undefined);
   }
 
   get isRunning(): boolean {
@@ -354,11 +498,11 @@ class OmpSessionRuntime {
   }
 
   get currentTurnId(): string | undefined {
-    return this.turnId;
+    return this.turnId ?? this.recoveryTurnId;
   }
 
   get alive(): boolean {
-    return this.rpc.isAlive;
+    return !this.disposed && !this.connecting && !this.recovery && !this.recoveryError && this.rpc.isAlive;
   }
 
   async refreshSessionFile(): Promise<void> {
@@ -469,6 +613,16 @@ class OmpSessionRuntime {
   }
 
   async abort(expectedTurnId?: string): Promise<boolean> {
+    if (this.recovery || this.recoveryError) {
+      if (expectedTurnId !== undefined && expectedTurnId !== this.recoveryTurnId) return false;
+      this.recoveryCancelled = true;
+      clearTimeout(this.recoveryTimer);
+      this.cancelRecoveryDelay?.();
+      this.rpc.dispose();
+      this.recoveryError = Object.assign(new Error("OMP reconnection was cancelled. Queued messages are preserved."), { errorCode: "OMP_RECOVERY_FAILED" });
+      this.stopLoop();
+      return true;
+    }
     if (!this.turnId || (expectedTurnId !== undefined && expectedTurnId !== this.turnId)) return false;
     this.stopLoop();
     await this.rpc.request({ type: "abort" }).catch(() => undefined);
@@ -476,9 +630,20 @@ class OmpSessionRuntime {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    clearTimeout(this.recoveryResetTimer);
+    this.generation += 1;
+    clearTimeout(this.recoveryTimer);
+    this.cancelRecoveryDelay?.();
+    this.recoveryQueue.length = 0;
+    this.queuedImages.clear();
+    this.applyQueue({ steering: [], followUp: [] });
     this.closeHost();
     this.stopLoop();
     this.rpc.dispose();
+    this.finish();
+    this.onExit();
   }
 
   loopState(): { loop: { prompt: string; total: number; done: number } | null } {
@@ -508,6 +673,8 @@ class OmpSessionRuntime {
   }
 
   private completePrompt(status: string, sessionSettled: boolean): void {
+    const rpc = this.rpc;
+    const turnId = this.turnId;
     if (!this.turnId) return;
     this.pendingPromptResult = { status, sessionSettled };
     if (status !== "completed") this.stopLoop();
@@ -515,6 +682,8 @@ class OmpSessionRuntime {
     this.settlingTurn = this.refreshSessionFile().catch((error) => {
       this.side("native.notice", { sessionId: this.id, level: "error", message: `Session state could not be refreshed: ${error instanceof Error ? error.message : String(error)}` });
     }).then(() => {
+      if (this.disposed || this.rpc !== rpc || this.turnId !== turnId) return;
+      if (status === "completed") this.recoveryAttempt = 0;
       const optimistic = this.lastPromptUserId;
       this.finish();
       this.onTurnSettled?.(optimistic);
@@ -539,25 +708,48 @@ class OmpSessionRuntime {
 
   /** Interrupt the running turn with a message (delivered at the next turn boundary). */
   async steer(content: string, optimisticId: string | undefined, images: unknown[] = []): Promise<void> {
-    if (!this.turnId) throw Object.assign(new Error("No active turn to steer"), { errorCode: "TURN_NOT_FOUND" });
+    if (!this.canQueue) throw Object.assign(new Error("No active turn to steer"), { errorCode: "TURN_NOT_FOUND" });
     if (optimisticId) this.pendingSteers.push({ text: content, optimisticId });
-    await this.rpc.request({ type: "steer", message: content, ...(images.length ? { images } : {}) });
+    await this.insert({ queue: "steering", message: content, images });
   }
 
   /** Queue a message omp sends after the current run finishes. */
   async followUp(content: string): Promise<void> {
-    if (!this.turnId) throw Object.assign(new Error("No active turn"), { errorCode: "TURN_NOT_FOUND" });
-    await this.rpc.request({ type: "follow_up", message: content });
+    if (!this.canQueue) throw Object.assign(new Error("No active turn"), { errorCode: "TURN_NOT_FOUND" });
+    await this.insert({ queue: "followUp", message: content });
+  }
+
+  private insert(entry: QueuedInsertion): Promise<void> {
+    if (entry.images?.length) this.queuedImages.set(ompQueueEntryId(entry.queue, entry.message), entry.images);
+    const operation = this.insertionTail.then(async () => {
+      if (this.disposed) throw Object.assign(new Error("OMP session was disposed"), { errorCode: "OMP_PROCESS_EXITED" });
+      if (this.recovery || this.recoveryError || !this.rpc.isAlive) {
+        this.recoveryQueue.push(entry);
+        this.publishQueue();
+        return;
+      }
+      try {
+        await this.rpc.request({ type: entry.queue === "steering" ? "steer" : "follow_up", message: entry.message, ...(entry.images?.length ? { images: entry.images } : {}) });
+      } catch (error) {
+        if (!this.disposed && !this.queue[entry.queue].includes(entry.message) && !this.recoveryQueue.some((queued) => queued.queue === entry.queue && queued.message === entry.message)) {
+          this.recoveryQueue.push({ ...entry, deliveryStatus: "uncertain" });
+          this.publishQueue();
+        }
+        throw Object.assign(new Error("OMP could not acknowledge the inserted message. It may have executed and will not be automatically resent."), { errorCode: "OMP_DELIVERY_UNCERTAIN", cause: error });
+      }
+    });
+    this.insertionTail = operation.catch(() => undefined);
+    return operation;
   }
 
   queueEntries(): QueuedTurnSummary[] {
     const createdAt = new Date().toISOString();
     const entries: QueuedTurnSummary[] = [];
     for (const queue of ["steering", "followUp"] as const) {
-      for (const message of this.queue[queue]) {
-        // A steer sent from the composer already shows in the transcript.
-        if (queue === "steering" && this.pendingSteers.some((steer) => steer.text === message)) continue;
-        entries.push({ id: ompQueueEntryId(queue, message), sessionId: this.id, content: message, position: entries.length, createdAt });
+      const queued: QueuedInsertion[] = [...this.queue[queue].map((message) => ({ queue, message })), ...this.recoveryQueue.filter((entry) => entry.queue === queue)];
+      for (const entry of queued) {
+        if (!entry.deliveryStatus && queue === "steering" && this.pendingSteers.some((steer) => steer.text === entry.message)) continue;
+        entries.push({ id: ompQueueEntryId(queue, entry.message), sessionId: this.id, content: entry.message, position: entries.length, createdAt, ...(entry.deliveryStatus ? { deliveryStatus: entry.deliveryStatus } : {}) });
       }
     }
     return entries;
@@ -566,12 +758,24 @@ class OmpSessionRuntime {
   async removeQueued(entryId: string): Promise<void> {
     const entry = parseOmpQueueEntryId(entryId);
     if (!entry) return;
+    const local = this.recoveryQueue.findIndex((item) => item.queue === entry.queue && item.message === entry.message);
+    if (local >= 0) {
+      this.recoveryQueue.splice(local, 1);
+      this.publishQueue();
+      return;
+    }
     await this.rpc.request({ type: "remove_queued_message", message: entry.message, queue: entry.queue });
   }
 
   async promoteQueued(entryId: string): Promise<void> {
     const entry = parseOmpQueueEntryId(entryId);
     if (!entry || entry.queue !== "followUp") return;
+    const local = this.recoveryQueue.findIndex((item) => item.queue === "followUp" && item.message === entry.message);
+    if (local >= 0) {
+      this.recoveryQueue[local]!.queue = "steering";
+      this.publishQueue();
+      return;
+    }
     await this.rpc.request({ type: "promote_queued_message", message: entry.message });
   }
 
@@ -840,6 +1044,10 @@ class OmpSessionRuntime {
 
   private applyQueue(queue: { steering: string[]; followUp: string[] }): void {
     this.queue = queue;
+    this.publishQueue();
+  }
+
+  private publishQueue(): void {
     this.side("native.queue.changed", { sessionId: this.id, entries: this.queueEntries() });
   }
 
@@ -889,6 +1097,7 @@ class OmpSessionRuntime {
     this.lastPromptUserId = undefined;
     this.lastPromptText = "";
     this.previousPromptUserEntry = undefined;
+    this.emitStatus();
   }
 
   private onFrame(frame: OmpFrame): void {
@@ -1062,6 +1271,9 @@ class OmpSessionRuntime {
         const message = frame.message;
         const id = typeof frame.messageId === "string" ? frame.messageId : randomUUID();
         if (message?.role === "user") {
+          const originalText = textOf(message.content).text;
+          this.queuedImages.delete(ompQueueEntryId("steering", originalText));
+          this.queuedImages.delete(ompQueueEntryId("followUp", originalText));
           const text = textOf(message.content).text.trim();
           const steerIndex = this.userMessageId ? -1 : this.pendingSteers.findIndex((steer) => steer.text.trim() === text);
           const steer = steerIndex >= 0 ? this.pendingSteers.splice(steerIndex, 1)[0] : undefined;
@@ -1159,10 +1371,23 @@ export class OmpSessionService {
   private readonly pathIds = new Map<string, string>();
   private readonly runtimes = new Map<string, OmpSessionRuntime>();
   private readonly opening = new Map<string, Promise<OmpSessionRuntime>>();
+  private readonly openingRuntimes = new Map<string, OmpSessionRuntime>();
+  private readonly epochs = new Map<string, number>();
+  private readonly reconnectDelays: readonly number[];
+  private approvalMode: OmpApprovalMode = "write";
 
-  constructor(options: { agentDir?: string; sessionRoot?: string } = {}) {
+  constructor(options: { agentDir?: string; sessionRoot?: string; reconnectDelays?: readonly number[] } = {}) {
     this.agentDir = resolve(options.agentDir ?? ompAgentDir());
     this.root = resolve(options.sessionRoot ?? join(this.agentDir, "sessions"));
+    this.reconnectDelays = options.reconnectDelays ?? [250, 1000, 4000];
+  }
+
+  /** Desktop-local policy is a CLI override, never an OMP config write. */
+  setApprovalMode(mode: unknown): void {
+    const next = normalizeOmpApprovalMode(mode);
+    if (next === this.approvalMode) return;
+    this.approvalMode = next;
+    void this.recycleIdle();
   }
 
   private prefsCache?: OmpPreferences;
@@ -1241,15 +1466,12 @@ export class OmpSessionService {
     }
     const env = { ...process.env };
     if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = this.agentDir;
-    const rpc = new OmpRpcProcess(resolveOmpBinary(), ["--cwd", record.cwd, "--resume", record.path], {
+    const rpc = new OmpRpcProcess(resolveOmpBinary(), ["--cwd", record.cwd, "--resume", record.path, "--approval-mode", this.approvalMode], {
       cwd: existsSync(record.cwd) ? record.cwd : homedir(),
       env,
     });
     try {
-      await Promise.race([
-        rpc.ready,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
-      ]);
+      await rpc.ready;
       return await fn(rpc);
     } finally {
       rpc.dispose();
@@ -1347,12 +1569,9 @@ export class OmpSessionService {
     const binary = resolveOmpBinary();
     const env = { ...process.env };
     if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = this.agentDir;
-    const rpc = new OmpRpcProcess(binary, ["--no-session"], { cwd: homedir(), env });
+    const rpc = new OmpRpcProcess(binary, ["--no-session", "--approval-mode", this.approvalMode], { cwd: homedir(), env });
     try {
-      await Promise.race([
-        rpc.ready,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
-      ]);
+      await rpc.ready;
       const listed = await rpc.request<{ models?: any[] }>({ type: "get_available_models" }, 60_000);
       const state = await rpc.request<{ model?: any }>({ type: "get_state" }).catch(() => undefined);
       const models: OmpModelInfo[] = (listed?.models ?? [])
@@ -1631,50 +1850,59 @@ export class OmpSessionService {
   }
 
   private async runtimeFor(id: string, notify: OmpNotifier): Promise<OmpSessionRuntime> {
-    const existing = this.runtimes.get(id);
-    if (existing?.alive) return existing;
     const pending = this.opening.get(id);
     if (pending) return pending;
+    const existing = this.runtimes.get(id);
+    if (existing) {
+      await existing.readyForPrompt();
+      return existing;
+    }
+    const epoch = this.epochs.get(id) ?? 0;
     const record = this.record(id);
-    if (!(record.path && existsSync(record.path)) && !record.model) await this.refreshDefaultRole();
-    const opening = OmpSessionRuntime.start({
-      id,
-      cwd: record.cwd,
-      sessionPath: record.path && existsSync(record.path) ? record.path : undefined,
-      // An explicit choice wins; a fresh chat falls back to the remembered model.
-      model: record.model ?? (record.path && existsSync(record.path) ? undefined : this.newSessionModel()),
-      thinkingLevel: record.thinkingLevel ?? (record.path && existsSync(record.path) ? undefined : this.newSessionThinking()),
-      agentDir: this.agentDir,
-      planMode: this.planModes.has(id),
-      side: (method, params) => this.side(method, params),
-      notify,
-      record,
-      onSessionFile: (path) => {
-        let real = path;
-        try { real = realpathSync(path); } catch { /* not written yet */ }
-        // A live process only moves files on `branch` (edit / regenerate):
-        // the pre-edit file stays on disk but is no longer this chat.
-        if (record.path && record.path !== real) this.hideFile(record.path);
-        record.path = real;
-        this.pathIds.set(real, id);
-      },
-      onExit: () => {
-        if (this.runtimes.get(id) === runtime) this.runtimes.delete(id);
-      },
-    });
-    let runtime: OmpSessionRuntime | undefined;
-    this.opening.set(id, opening);
     const fresh = !(record.path && existsSync(record.path));
+    let runtime: OmpSessionRuntime | undefined;
+    const opening = (async () => {
+      if (fresh && !record.model) await this.refreshDefaultRole();
+      if ((this.epochs.get(id) ?? 0) !== epoch) throw Object.assign(new Error("OMP session startup was cancelled"), { errorCode: "OMP_PROCESS_EXITED" });
+      if (fresh && record.fast === undefined) record.fast = this.prefs().fast;
+      const started = await OmpSessionRuntime.start({
+        id,
+        cwd: record.cwd,
+        sessionPath: record.path && existsSync(record.path) ? record.path : undefined,
+        model: record.model ?? (fresh ? this.newSessionModel() : undefined),
+        thinkingLevel: record.thinkingLevel ?? (fresh ? this.newSessionThinking() : undefined),
+        agentDir: this.agentDir,
+        planMode: this.planModes.has(id),
+        approvalMode: () => this.approvalMode,
+        reconnectDelays: this.reconnectDelays,
+        side: (method, params) => this.side(method, params),
+        notify,
+        record,
+        onCreated: (created) => { runtime = created; this.openingRuntimes.set(id, created); },
+        onSessionFile: (path) => {
+          let real = path;
+          try { real = realpathSync(path); } catch { /* not written yet */ }
+          if (record.path && record.path !== real) this.hideFile(record.path);
+          record.path = real;
+          this.pathIds.set(real, id);
+        },
+        onExit: () => {
+          if (this.runtimes.get(id) === runtime) this.runtimes.delete(id);
+        },
+      });
+      if ((this.epochs.get(id) ?? 0) !== epoch) {
+        started.dispose();
+        throw Object.assign(new Error("OMP session startup was cancelled"), { errorCode: "OMP_PROCESS_EXITED" });
+      }
+      this.runtimes.set(id, started);
+      return started;
+    })();
+    this.opening.set(id, opening);
     try {
-      runtime = await opening;
-      this.runtimes.set(id, runtime);
-      // A new chat inherits the remembered fast-mode choice (omp has no CLI flag for it).
-      const wantFast = record.fast ?? (fresh ? this.prefs().fast : undefined);
-      // omp handles stdin commands in order, so this lands before the first prompt.
-      if (wantFast !== undefined) void runtime.request({ type: "set_fast_mode", enabled: wantFast }).catch(() => undefined);
-      return runtime;
+      return await opening;
     } finally {
-      this.opening.delete(id);
+      if (this.opening.get(id) === opening) this.opening.delete(id);
+      if (this.openingRuntimes.get(id) === runtime) this.openingRuntimes.delete(id);
     }
   }
 
@@ -1692,6 +1920,7 @@ export class OmpSessionService {
     const record = this.record(id);
     const branchEntry = options.truncateFromMessageId ? this.resolveEntryId(record, options.truncateFromMessageId) : undefined;
     const runtime = await this.runtimeFor(id, notify);
+    if (runtime.isRunning) throw Object.assign(new Error("OMP is delivering preserved queued messages. Wait for them to finish before sending a new prompt."), { errorCode: "AGENT_BUSY" });
     runtime.setNotifier(notify);
     runtime.stopLoop();
     runtime.onTurnSettled = (optimistic) => {
@@ -1740,7 +1969,7 @@ export class OmpSessionService {
 
   private liveRuntime(id: string): OmpSessionRuntime {
     const runtime = this.runtimes.get(id);
-    if (!runtime?.alive || !runtime.isRunning) {
+    if (!runtime?.canQueue) {
       throw Object.assign(new Error("No active turn"), { errorCode: "TURN_NOT_FOUND" });
     }
     return runtime;
@@ -2022,7 +2251,7 @@ export class OmpSessionService {
     current?.rpc.dispose();
     const env = { ...process.env };
     if (process.env.PI_DESKTOP_OMP_AGENT_DIR?.trim()) env.PI_CODING_AGENT_DIR = this.agentDir;
-    const rpc = new OmpRpcProcess(resolveOmpBinary(), ["--cwd", cwd, "--no-session", "--no-title"], { cwd, env, mode: "rpc-ui" });
+    const rpc = new OmpRpcProcess(resolveOmpBinary(), ["--cwd", cwd, "--no-session", "--no-title", "--approval-mode", this.approvalMode], { cwd, env, mode: "rpc-ui" });
     rpc.onFrame((frame) => {
       if (frame.type !== "extension_ui_request") return;
       const requestId = String(frame.id ?? "");
@@ -2061,10 +2290,7 @@ export class OmpSessionService {
 
   private async utilityReady(): Promise<OmpRpcProcess> {
     const rpc = this.utility(this.utilityProcess?.cwd ?? homedir());
-    await Promise.race([
-      rpc.ready,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("omp did not become ready within 60s")), 60_000)),
-    ]);
+    await rpc.ready;
     return rpc;
   }
 
@@ -2151,11 +2377,17 @@ export class OmpSessionService {
   }
 
   dispose(id: string): void {
+    this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
+    this.openingRuntimes.get(id)?.dispose();
+    this.openingRuntimes.delete(id);
     this.runtimes.get(id)?.dispose();
     this.runtimes.delete(id);
   }
 
   disposeAll(): void {
+    for (const id of this.opening.keys()) this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
+    for (const runtime of this.openingRuntimes.values()) runtime.dispose();
+    this.openingRuntimes.clear();
     clearTimeout(this.utilityProcess?.timer);
     this.utilityProcess?.rpc.dispose();
     this.utilityProcess = undefined;

@@ -54,6 +54,7 @@ describe("omp binary resolution", () => {
 
 // A tiny stand-in for `omp --mode rpc` that speaks the same JSONL frames.
 const FAKE_OMP = `#!/usr/bin/env node
+if (process.argv.includes("--version")) { process.stdout.write("18.10.0\\n"); process.exit(0); }
 if (process.argv[2] === "config") {
   process.stdout.write(JSON.stringify({ key: "modelRoles", value: process.env.FAKE_OMP_ROLES ? JSON.parse(process.env.FAKE_OMP_ROLES) : {} }));
   process.exit(0);

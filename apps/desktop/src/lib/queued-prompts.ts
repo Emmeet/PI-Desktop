@@ -6,6 +6,8 @@ export type QueuedPrompt = {
   content: string;
   draft: ComposerDraftSnapshot;
   createdAt: number;
+  /** An acknowledged result is missing; retained for explicit user review only. */
+  deliveryStatus?: "uncertain";
   /**
    * Set once the row was promoted with Send now. Promoted rows form the head
    * of the queue in ascending priority (click) order; they start next and stay

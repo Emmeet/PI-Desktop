@@ -58,7 +58,8 @@ export function ComposerStatus({
               t("chat.queuedPromptEmpty");
             const promoted = isPromotedQueuedPrompt(item);
             const pending = isPendingQueuedPrompt(item);
-            const actionsLocked = promoted || pending;
+            const uncertain = item.deliveryStatus === "uncertain";
+            const actionsLocked = promoted || pending || uncertain;
             const sendNowLocked = approvalPending || actionsLocked;
             // Pending rows have no Host id. Promoted rows keep their order,
             // but remain cancellable until the Host starts delivery.
@@ -76,8 +77,9 @@ export function ComposerStatus({
                 data-testid="queued-prompt"
                 data-priority={promoted ? "true" : "false"}
               >
-                <span className="composer-queued-prompt-text" title={label}>
+                <span className="composer-queued-prompt-text" title={uncertain ? `${label} · ${t("errors.OMP_DELIVERY_UNCERTAIN")}` : label}>
                   {label}
+                  {uncertain && <span className="block text-xs text-text-muted" role="status">{t("errors.OMP_DELIVERY_UNCERTAIN")}</span>}
                 </span>
                 {/* omp keeps its own queue order: only send-now and remove apply. */}
                 {item.id.startsWith("ompq:") ? null : (
