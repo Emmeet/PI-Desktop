@@ -753,6 +753,9 @@ export const en = {
     openArtifactLabel: "Open goal artifact {{path}}",
   },
   onboarding: {
+    ompSetup: "Set up an omp provider or sign in",
+    ompSetupHint: "Sign in under Accounts & subscriptions, or configure a provider in omp, then return here. Available models are read from omp.",
+    ompUnavailable: "Could not check omp model availability. Check your omp installation and provider setup, or open Accounts & subscriptions to sign in.",
     title: "Get started",
     addProvider: "Add an AI provider",
     saveKey: "Save your API key",
@@ -1060,7 +1063,7 @@ sklm: {
     rolesNew: "New role",
     ompApproval: {
       title: "Tool approvals",
-      description: "omp's own approval settings (tools.approvalMode and per-tool rules in ~/.omp/agent/config.yml). Idle chats use the change on their next message.",
+      description: "The desktop-only approval mode defaults to write and applies to the next reply. It leaves your global omp configuration unchanged. Per-tool rules are still shared with omp.",
       error: "Error",
       mode: "Approval mode",
       remove: "Remove",
@@ -2016,6 +2019,7 @@ sklm: {
     noProjects: "No projects yet",
   },
   scheduled: {
+    nameRequired: "Enter a task name before saving.",
     description: "Run recurring agent tasks while OMP Desktop is open.",
     edit: "Edit task",
     hourlyHint: "Runs every hour, starting one hour after saving or enabling. Restarting the app starts a new interval.",
@@ -3016,6 +3020,16 @@ importConfirm: "Imported extensions run inside the agent process with the same a
     },
   },
   errors: {
+    OMP_NOT_FOUND: "omp was not found. Install it with bun install -g @oh-my-pi/pi-coding-agent@18, or set PI_DESKTOP_OMP_BIN to its executable path.",
+    OMP_VERSION_PROBE_FAILED: "Could not detect the omp version. Check its installation and executable path, then restart OMP Desktop.",
+    OMP_VERSION_UNSUPPORTED: "OMP Desktop requires a stable omp version >=18.10.0 and <19.0.0. Install a compatible version, then restart the app.",
+    OMP_PROTOCOL_UNSUPPORTED: "This omp RPC protocol is not supported. Install a compatible omp version, then restart OMP Desktop.",
+    OMP_START_FAILED: "omp could not start. Check its installation and executable path, then try again.",
+    OMP_PROCESS_EXITED: "omp exited. Reconnecting keeps queued messages, but does not replay the running request.",
+    OMP_DELIVERY_UNCERTAIN: "This message may have reached omp. Check the conversation before sending it again.",
+    OMP_RECOVERY_FAILED: "Could not reconnect to omp. Your queued messages are retained. Check omp, then try reconnecting again.",
+    OMP_RECONNECTING: "Reconnecting to omp: attempt {{attempt}} of {{maxAttempts}} in {{delayMs}} ms. Queued messages are retained.",
+    OMP_RECONNECTED: "Reconnected to omp. Queued messages were retained; the interrupted request was not replayed.",
     COMPOSER_MCP_UNAVAILABLE: "The selected MCP server is disconnected or unavailable in this project. Reconnect it and select it again.",
     COMPOSER_MCP_REQUEST_REQUIRED: "Add task text or an attachment after selecting an MCP server or tool.",
     HOST_UNAVAILABLE: "The local service is unavailable",

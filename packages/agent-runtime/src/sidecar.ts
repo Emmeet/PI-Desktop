@@ -5,6 +5,7 @@ import { parseMcpServerIds, parseMcpToolNames } from "./mcp-tool-selection.js";
  * Host access is proxied through main (single host-core process).
  */
 import { randomUUID } from "node:crypto";
+import { assertOmpBinaryCompatible, resolveOmpBinary } from "./omp/binary.js";
 import type { ModelAuth } from "@earendil-works/pi-ai";
 import { ParentHostProxy } from "./parent-host-proxy.js";
 import { visionFromModelConfig } from "./model-capabilities.js";
@@ -34,6 +35,7 @@ import {
   isCommandShellOption,
   normalizeMode,
   normalizeNetworkProxy,
+  normalizeOmpApprovalMode,
   OAUTH_AUTH_KIND,
   readNdjsonLines,
 } from "@pi-desktop/shared";
@@ -54,10 +56,12 @@ type RuntimeMap = Map<string, DesktopAgentRuntime>;
 
 type OmpModule = typeof import("./omp/service.js");
 let ompModule: OmpModule | undefined;
+let ompApprovalMode = normalizeOmpApprovalMode(undefined);
 async function loadOmp(): Promise<OmpModule> {
   if (!ompModule) {
     ompModule = await import("./omp/service.js");
     ompModule.ompSessionService().setSideChannel((method, params) => notify(method, params));
+    ompModule.ompSessionService().setApprovalMode(ompApprovalMode);
   }
   return ompModule;
 }
@@ -421,7 +425,14 @@ async function handle(method: string, params: any): Promise<unknown> {
             : undefined,
         );
       }
+      if (params && typeof params === "object" && "ompApprovalMode" in params) {
+        ompApprovalMode = normalizeOmpApprovalMode(params.ompApprovalMode);
+        ompModule?.ompSessionService().setApprovalMode(ompApprovalMode);
+      }
       return { ok: true, mode: "host-proxy" };
+    }
+    case "omp.capability.check": {
+      return { version: assertOmpBinaryCompatible(resolveOmpBinary()), protocolVersion: 1 };
     }
     case "sidecar.health":
       return { ok: true, runtimes: runtimes.size };

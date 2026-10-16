@@ -22,6 +22,7 @@ import { workPanelLayout } from "../../lib/work-panel-resize";
 import { LiveVoiceStatusHost } from "../voice/live/LiveVoiceStatusHost";
 import { CollapsedTitlebarActions, RoutePending } from "./chrome";
 import { useAppShellRuntime } from "./useAppShellRuntime";
+import { OmpCompatibilityNotice } from "../omp/OmpCompatibilityNotice";
 
 const SettingsPage = lazy(() =>
   import("../../pages/SettingsPage").then((module) => ({
@@ -335,6 +336,7 @@ export function AppShell() {
         ) : null}
         <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
         <ToastHost />
+        <OmpCompatibilityNotice />
         <LiveVoiceStatusHost />
         <PluginRendererHost />
         <ExtensionPromptHost />

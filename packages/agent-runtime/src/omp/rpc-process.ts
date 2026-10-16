@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { dirname } from "node:path";
+import { assertOmpBinaryCompatible, OmpCompatibilityError } from "./binary.js";
 
 export type OmpFrame = Record<string, any> & { type: string };
 
@@ -22,8 +23,10 @@ export class OmpRpcProcess {
   private readonly pending = new Map<string, Pending>();
   private readonly listeners = new Set<(frame: OmpFrame) => void>();
   private readonly exitListeners = new Set<(reason: string) => void>();
-  private stderrTail = "";
   private exited = false;
+  private disposed = false;
+  private disposeTimer?: NodeJS.Timeout;
+  private readyTimer?: NodeJS.Timeout;
   readonly ready: Promise<void>;
 
   constructor(binary: string, args: string[], options: { cwd: string; env?: NodeJS.ProcessEnv; mode?: "rpc" | "rpc-ui" }) {
@@ -31,6 +34,7 @@ export class OmpRpcProcess {
     const env = { ...(options.env ?? process.env) };
     const sep = process.platform === "win32" ? ";" : ":";
     env.PATH = [dirname(binary), env.PATH ?? ""].filter(Boolean).join(sep);
+    assertOmpBinaryCompatible(binary, env);
     // `rpc-ui` gives omp an interactive UI over the same JSONL channel, which
     // is what tool approvals and the ask tool need (extension_ui_request).
     const command = [binary, ["--mode", options.mode ?? "rpc", ...args]] as const;
@@ -52,6 +56,11 @@ export class OmpRpcProcess {
       failReady = reject;
     });
     this.ready.catch(() => undefined);
+    this.readyTimer = setTimeout(() => {
+      failReady(Object.assign(new Error("omp did not become ready within 60s. Check the omp installation and restart the app."), { errorCode: "OMP_START_FAILED" }));
+      this.dispose();
+    }, 60_000);
+    this.readyTimer.unref?.();
     this.child.stdout.on("data", (chunk: string) => {
       this.buffer += chunk;
       let index: number;
@@ -65,7 +74,15 @@ export class OmpRpcProcess {
         } catch {
           continue;
         }
-        if (frame.type === "ready") markReady();
+        if (frame.type === "ready") {
+          clearTimeout(this.readyTimer);
+          if (frame.protocolVersion !== 1) {
+            failReady(new OmpCompatibilityError("OMP_PROTOCOL_UNSUPPORTED", "omp did not start with the supported RPC protocol v1."));
+            this.dispose();
+            return;
+          }
+          markReady();
+        }
         if (frame.type === "response" && typeof frame.id === "string" && this.pending.has(frame.id)) {
           const pending = this.pending.get(frame.id)!;
           this.pending.delete(frame.id);
@@ -75,24 +92,26 @@ export class OmpRpcProcess {
         for (const listener of this.listeners) listener(frame);
       }
     });
-    this.child.stderr.on("data", (chunk: string) => {
-      this.stderrTail = (this.stderrTail + chunk).slice(-4000);
-    });
+    // Drain without retaining stderr: extensions may print credentials.
+    this.child.stderr.resume();
     const onExit = (reason: string) => {
       if (this.exited) return;
       this.exited = true;
-      const error = new Error(`omp exited (${reason})${this.stderrTail ? `: ${this.stderrTail.trim().slice(-800)}` : ""}`);
+      clearTimeout(this.readyTimer);
+      clearTimeout(this.disposeTimer);
+      const error = Object.assign(new Error(`omp exited (${reason})`), { errorCode: "OMP_PROCESS_EXITED" });
       failReady(error);
       for (const pending of this.pending.values()) pending.reject(error);
       this.pending.clear();
       for (const listener of this.exitListeners) listener(error.message);
     };
     this.child.on("error", (error) => onExit(error.message));
-    this.child.on("exit", (code, signal) => onExit(signal ? `signal ${signal}` : `code ${code}`));
+    this.child.on("close", (code, signal) => onExit(signal ? `signal ${signal}` : `code ${code}`));
+    this.child.stdin.on("error", () => onExit("stdin closed"));
   }
 
   get isAlive(): boolean {
-    return !this.exited;
+    return !this.exited && !this.disposed;
   }
 
   onFrame(listener: (frame: OmpFrame) => void): () => void {
@@ -111,7 +130,7 @@ export class OmpRpcProcess {
   }
 
   send(command: Record<string, unknown>): void {
-    if (this.exited) throw new Error("omp process is not running");
+    if (this.exited || this.disposed) throw Object.assign(new Error("omp process is not running"), { errorCode: "OMP_PROCESS_EXITED" });
     this.child.stdin.write(`${JSON.stringify(command)}\n`);
   }
 
@@ -137,9 +156,18 @@ export class OmpRpcProcess {
   }
 
   dispose(): void {
-    if (this.exited) return;
+    if (this.exited || this.disposed) return;
+    this.disposed = true;
+    clearTimeout(this.readyTimer);
     try { this.child.stdin.end(); } catch { /* already closed */ }
-    const timer = setTimeout(() => { if (!this.exited) this.child.kill("SIGTERM"); }, 3000);
-    timer.unref?.();
+    if (process.platform === "win32" && this.child.pid) {
+      // Killing cmd.exe alone leaves the actual Bun/Node agent running.
+      const killer = spawn("taskkill", ["/pid", String(this.child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      killer.on("error", () => this.child.kill("SIGTERM"));
+    } else {
+      this.child.kill("SIGTERM");
+    }
+    this.disposeTimer = setTimeout(() => { if (!this.exited) this.child.kill("SIGKILL"); }, 3000);
+    this.disposeTimer.unref?.();
   }
 }

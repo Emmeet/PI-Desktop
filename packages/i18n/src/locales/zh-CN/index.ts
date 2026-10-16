@@ -746,6 +746,9 @@ export const zhCN = {
     openArtifactLabel: "打开目标文件 {{path}}",
   },
   onboarding: {
+    ompSetup: "配置 omp 提供商或登录账号",
+    ompSetupHint: "请在“账号与订阅”中登录，或在 omp 中配置提供商，然后返回此处。可用模型由 omp 提供。",
+    ompUnavailable: "无法检查 omp 模型可用性。请检查 omp 安装和提供商配置，或打开“账号与订阅”登录。",
     title: "开始使用",
     addProvider: "添加 AI 模型服务",
     saveKey: "保存 API 密钥",
@@ -1192,7 +1195,7 @@ sklm: {
     rolesNew: "新建角色",
     ompApproval: {
       title: "工具审批",
-      description: "omp 自己的审批设置（~/.omp/agent/config.yml 中的 tools.approvalMode 和按工具规则）。空闲对话在下一条消息时生效。",
+      description: "审批模式仅保存在桌面端，默认为 write，并在下一次回复时生效，不会改动全局 omp 配置。按工具设置的规则仍与 omp 共享。",
       error: "错误",
       mode: "审批模式",
       remove: "移除",
@@ -1981,6 +1984,7 @@ sklm: {
     noProjects: "暂无项目",
   },
   scheduled: {
+    nameRequired: "请输入任务名称后再保存。",
     description: "应用运行时，按计划自动执行 Agent 任务。",
     edit: "编辑任务",
     hourlyHint: "保存或启用后，每隔 1 小时执行一次。重启应用后重新计时。",
@@ -2941,6 +2945,16 @@ sklm: {
     phase: { idle: "关闭", preparing: "正在准备", "acquiring-mic": "等待麦克风", negotiating: "正在协商", connecting: "连接中…", connected: "已连接", reconnecting: "正在重连", closing: "正在结束…", ended: "已结束", failed: "已停止" },
   },
   errors: {
+    OMP_NOT_FOUND: "未找到 omp。请运行 bun install -g @oh-my-pi/pi-coding-agent@18 安装，或将 PI_DESKTOP_OMP_BIN 设为可执行文件路径。",
+    OMP_VERSION_PROBE_FAILED: "无法检测 omp 版本。请检查安装和可执行文件路径，然后重启 OMP Desktop。",
+    OMP_VERSION_UNSUPPORTED: "OMP Desktop 需要 >=18.10.0 且 <19.0.0 的稳定版 omp。请安装兼容版本后重启应用。",
+    OMP_PROTOCOL_UNSUPPORTED: "不支持此 omp RPC 协议。请安装兼容的 omp 版本后重启 OMP Desktop。",
+    OMP_START_FAILED: "无法启动 omp。请检查安装和可执行文件路径后重试。",
+    OMP_PROCESS_EXITED: "omp 已退出。重新连接会保留排队消息，但不会重放运行中的请求。",
+    OMP_DELIVERY_UNCERTAIN: "这条消息可能已送达 omp。请先检查对话，再决定是否重新发送。",
+    OMP_RECOVERY_FAILED: "无法重新连接 omp。排队消息已保留，请检查 omp 后重试连接。",
+    OMP_RECONNECTING: "正在重新连接 omp：{{delayMs}} 毫秒后进行第 {{attempt}} 次尝试（共 {{maxAttempts}} 次）。排队消息已保留。",
+    OMP_RECONNECTED: "已重新连接 omp。排队消息已保留，中断的请求未被重放。",
     COMPOSER_MCP_UNAVAILABLE: "所选 MCP 服务器已断开或在当前项目中不可用。请重新连接并选择。",
     COMPOSER_MCP_REQUEST_REQUIRED: "选择 MCP 服务器或工具后，请输入任务内容或添加附件。",
     HOST_UNAVAILABLE: "本地服务不可用",

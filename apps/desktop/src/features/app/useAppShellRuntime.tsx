@@ -582,7 +582,10 @@ export function useAppShellRuntime() {
       useAppStore.getState().applyTodosChanged(snapshot),
     );
     // Host-pushed toasts (plugin runtime etc.) are informational.
-    const offToast = api.onToast((message) => showToast(message));
+    const offToast = api.onToast((message, notice) => {
+      const key = notice?.code ? `errors.${notice.code}` : "";
+      showToast(key && t(key) !== key ? t(key, notice) : message);
+    });
     const offNotificationSound = api.onNotificationSound(playNotificationChime);
     // The first plaintext hop to an endpoint the user typed. The shell owns the
     // wording, and recording `insecureNoticeAcknowledged` keeps it to once; a

@@ -746,6 +746,9 @@ export const zhTW = {
     openArtifactLabel: "開啟目標檔案 {{path}}",
   },
   onboarding: {
+    ompSetup: "設定 omp 提供者或登入帳號",
+    ompSetupHint: "請在「帳號與訂閱」中登入，或在 omp 中設定提供者，然後返回此處。可用模型由 omp 提供。",
+    ompUnavailable: "無法檢查 omp 模型是否可用。請檢查 omp 安裝與提供者設定，或開啟「帳號與訂閱」登入。",
     title: "開始使用",
     addProvider: "新增 AI 模型服務",
     saveKey: "儲存 API 金鑰",
@@ -1192,7 +1195,7 @@ sklm: {
     rolesNew: "新增角色",
     ompApproval: {
       title: "工具審核",
-      description: "omp 自己的審核設定（~/.omp/agent/config.yml 中的 tools.approvalMode 與各工具規則）。閒置對話在下一則訊息時生效。",
+      description: "核准模式僅儲存在桌面端，預設為 write，於下一次回覆時生效，不會變更全域 omp 設定。各工具的規則仍與 omp 共用。",
       error: "錯誤",
       mode: "審核模式",
       remove: "移除",
@@ -1981,6 +1984,7 @@ sklm: {
     noProjects: "暫無專案",
   },
   scheduled: {
+    nameRequired: "請先輸入任務名稱再儲存。",
     description: "應用程式執行時，按排程自動執行 Agent 任務。",
     edit: "編輯任務",
     hourlyHint: "儲存或啟用後，每隔 1 小時執行一次。重新啟動應用程式後重新計時。",
@@ -2891,6 +2895,16 @@ sklm: {
     phase: { idle: "關閉", preparing: "準備中", "acquiring-mic": "等待麥克風", negotiating: "協商中", connecting: "連線中…", connected: "已連線", reconnecting: "重新連線中", closing: "正在結束…", ended: "已結束", failed: "已停止" },
   },
   errors: {
+    OMP_NOT_FOUND: "找不到 omp。請執行 bun install -g @oh-my-pi/pi-coding-agent@18 安裝，或將 PI_DESKTOP_OMP_BIN 設為執行檔路徑。",
+    OMP_VERSION_PROBE_FAILED: "無法偵測 omp 版本。請檢查安裝與執行檔路徑，然後重新啟動 OMP Desktop。",
+    OMP_VERSION_UNSUPPORTED: "OMP Desktop 需要 >=18.10.0 且 <19.0.0 的穩定版 omp。請安裝相容版本後重新啟動應用程式。",
+    OMP_PROTOCOL_UNSUPPORTED: "不支援此 omp RPC 協定。請安裝相容的 omp 版本後重新啟動 OMP Desktop。",
+    OMP_START_FAILED: "無法啟動 omp。請檢查安裝與執行檔路徑後重試。",
+    OMP_PROCESS_EXITED: "omp 已結束。重新連線會保留佇列訊息，但不會重送執行中的請求。",
+    OMP_DELIVERY_UNCERTAIN: "這則訊息可能已送達 omp。請先檢查對話，再決定是否重新傳送。",
+    OMP_RECOVERY_FAILED: "無法重新連線 omp。佇列訊息已保留，請檢查 omp 後重試連線。",
+    OMP_RECONNECTING: "正在重新連線 omp：{{delayMs}} 毫秒後進行第 {{attempt}} 次嘗試（共 {{maxAttempts}} 次）。佇列訊息已保留。",
+    OMP_RECONNECTED: "已重新連線 omp。佇列訊息已保留，中斷的請求未被重送。",
     COMPOSER_MCP_UNAVAILABLE: "所選 MCP 伺服器已中斷連線或在目前專案中無法使用。請重新連線並選取。",
     COMPOSER_MCP_REQUEST_REQUIRED: "選取 MCP 伺服器或工具後，請輸入任務內容或新增附件。",
     HOST_UNAVAILABLE: "本地服務不可用",

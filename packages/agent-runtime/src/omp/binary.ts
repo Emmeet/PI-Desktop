@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, win32 } from "node:path";
+import { delimiter, dirname, join, win32 } from "node:path";
 
 export const OMP_INSTALL_HINT =
   "Install oh-my-pi with `bun install -g @oh-my-pi/pi-coding-agent` (needs Bun: https://bun.sh), " +
@@ -11,6 +12,55 @@ export class OmpNotFoundError extends Error {
   constructor(searched: string[]) {
     super(`The omp (oh-my-pi) executable was not found. ${OMP_INSTALL_HINT} Searched: ${searched.join(", ") || "(nothing)"}`);
   }
+}
+
+/** Desktop speaks protocol v1 of the tested OMP 18 release line only. */
+export const OMP_SUPPORTED_VERSION_RANGE = ">=18.10.0 <19.0.0";
+const OMP_COMPATIBILITY_HINT = `Use omp ${OMP_SUPPORTED_VERSION_RANGE}: bun install -g @oh-my-pi/pi-coding-agent@18, or set PI_DESKTOP_OMP_BIN to a compatible executable, then restart the app.`;
+
+export class OmpCompatibilityError extends Error {
+  constructor(readonly errorCode: "OMP_VERSION_PROBE_FAILED" | "OMP_VERSION_UNSUPPORTED" | "OMP_PROTOCOL_UNSUPPORTED", message: string) {
+    super(`${message} ${OMP_COMPATIBILITY_HINT}`);
+  }
+}
+
+export function parseOmpVersion(output: string): string | undefined {
+  const match = /^(?:omp[ /]|oh-my-pi[ /])?v?(\d+)\.(\d+)\.(\d+)(?:\+[\w.-]+)?$/.exec(output.trim());
+  if (!match) return undefined;
+  return `${match[1]}.${match[2]}.${match[3]}`;
+}
+
+const compatibleBinaries = new Map<string, { stamp: string; version: string }>();
+
+/** Probe without loading credentials/config into Desktop or leaking subprocess output. */
+export function assertOmpBinaryCompatible(binary: string, env: NodeJS.ProcessEnv = process.env): string {
+  let stamp: string;
+  try {
+    const stat = statSync(binary);
+    stamp = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+  } catch {
+    throw new OmpNotFoundError([binary]);
+  }
+  const cached = compatibleBinaries.get(binary);
+  if (cached?.stamp === stamp) return cached.version;
+  const windowsShim = process.platform === "win32" && /\.(cmd|bat)$/i.test(binary);
+  const result = spawnSync(windowsShim ? `"${binary}"` : binary, ["--version"], {
+    env: { ...env, PATH: [dirname(binary), env.PATH ?? env.Path ?? ""].filter(Boolean).join(process.platform === "win32" ? ";" : delimiter) },
+    encoding: "utf8",
+    timeout: 10_000,
+    maxBuffer: 4096,
+    windowsHide: true,
+    ...(windowsShim ? { shell: true } : {}),
+  });
+  if (result.error || result.status !== 0) {
+    throw new OmpCompatibilityError("OMP_VERSION_PROBE_FAILED", "Could not run omp --version. Check the executable path and that Bun is installed.");
+  }
+  const version = parseOmpVersion(result.stdout);
+  if (!version) throw new OmpCompatibilityError("OMP_VERSION_PROBE_FAILED", "omp --version did not return a recognized stable version.");
+  const [major, minor] = version.split(".").map(Number);
+  if (major !== 18 || minor! < 10) throw new OmpCompatibilityError("OMP_VERSION_UNSUPPORTED", `Unsupported omp version ${version}.`);
+  compatibleBinaries.set(binary, { stamp, version });
+  return version;
 }
 
 function isExecutable(path: string): boolean {
