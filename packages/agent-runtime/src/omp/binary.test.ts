@@ -9,7 +9,12 @@ const roots: string[] = [];
 const processes: OmpRpcProcess[] = [];
 afterEach(() => {
   for (const process of processes.splice(0)) process.dispose();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  // Windows keeps a disposed child's script directory locked briefly (and a
+  // .cmd shim's grandchild may outlive it); retry, never fail the test on cleanup.
+  for (const root of roots.splice(0)) {
+    try { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+    catch (error) { if (process.platform !== "win32") throw error; }
+  }
 });
 
 function executable(source: string): { binary: string; root: string } {
@@ -55,9 +60,10 @@ describe("omp binary compatibility", () => {
   it.each([2, undefined, "1"])("rejects unsupported or absent RPC protocol %s before commands", async (protocolVersion) => {
     const source = `if (process.argv.includes("--version")) { console.log("18.10.0"); process.exit(0); }
 console.log(JSON.stringify({ type: "ready", protocolVersion: ${JSON.stringify(protocolVersion)} }));
+process.stdin.on("end", () => process.exit(0));
 process.stdin.resume();`;
-    const { binary, root } = executable(source);
-    const rpc = new OmpRpcProcess(binary, [], { cwd: root }); processes.push(rpc);
+    const { binary } = executable(source);
+    const rpc = new OmpRpcProcess(binary, [], { cwd: tmpdir() }); processes.push(rpc);
     await expect(rpc.ready).rejects.toMatchObject({ errorCode: "OMP_PROTOCOL_UNSUPPORTED", message: expect.stringContaining("18.10.0") });
     expect(rpc.isAlive).toBe(false);
     await expect(rpc.request({ type: "get_state" })).rejects.toMatchObject({ errorCode: "OMP_PROCESS_EXITED" });
