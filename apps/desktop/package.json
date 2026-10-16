@@ -289,6 +289,8 @@
       ]
     },
     "asarUnpack": [
+      "node_modules/transcribe-cpp/**/*.node",
+      "node_modules/transcribe-cpp/**/bin/**",
       "node_modules/@transcribe-cpp/**/*",
       "node_modules/@koromix/koffi-*/**/*",
       "node_modules/@picovoice/pvrecorder-node/**/*.node",

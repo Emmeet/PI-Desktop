@@ -367,3 +367,22 @@ test("the user row is inserted before the host round trip and echoed under the s
   );
   assert.match(attachments, /export function durableUserMessageId\([\s\S]*?UUID_PATTERN\.test\(requested\)[\s\S]*?!existing\.some\(\(message\) => message\?\.id === requested\)/);
 });
+
+test("reordering a queued prompt swaps plain neighbours only", () => {
+  // The Host reorders durable positions; the renderer mirrors one swap and
+  // never moves a promoted row or crosses into the priority block.
+  assert.match(
+    queuedPromptsLib,
+    /if \(!item \|\| isPromotedQueuedPrompt\(item\)\) return queues;/,
+  );
+  assert.match(
+    queuedPromptsLib,
+    /if \(!target \|\| isPromotedQueuedPrompt\(target\)\) return queues;/,
+  );
+  assert.match(
+    queueSlice,
+    /if \(!item \|\| item\.deliveryStatus === "uncertain" \|\| isPendingQueuedPrompt\(item\) \|\| isPromotedQueuedPrompt\(item\)\) \{/,
+  );
+  // A boundary no-op must not reach the Host.
+  assert.match(queueSlice, /if \(moved === before\) return;/);
+});

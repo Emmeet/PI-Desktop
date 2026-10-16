@@ -133,6 +133,91 @@ test("sandbox preload entries use standalone shared subpath bundles", () => {
   assert.doesNotMatch(pluginPanelPreloadSource, /from "@pi-desktop\/shared"/);
 });
 
+test("packaging keeps only shipped locales and excludes non-runtime artifacts", () => {
+  assert.deepEqual(packageJson.build.electronLanguages, [
+    "en-US",
+    "zh-CN",
+    // electron-builder uses underscore locale directories in macOS bundles.
+    "zh_CN",
+    "zh-TW",
+    "zh_TW",
+    "tr",
+    "de",
+    "es",
+    "fr",
+    "ko",
+    "pt-BR",
+    "pt_BR",
+  ]);
+  assert.ok(packageJson.build.files.includes("!**/*.map"));
+  assert.ok(
+    packageJson.build.files.includes(
+      "!**/node_modules/*/{test,tests,__tests__,powered-test,example,examples}/**",
+    ),
+  );
+  assert.ok(
+    packageJson.build.files.includes(
+      "!**/node_modules/**/*.{test,spec}.{js,cjs,mjs}",
+    ),
+  );
+  assert.ok(
+    packageJson.build.files.includes(
+      "!**/node_modules/node-addon-api/tools/**",
+    ),
+  );
+  assert.ok(
+    packageJson.build.files.includes(
+      "!**/node_modules/node-addon-api/*.{c,gyp,gypi,h,js,json}",
+    ),
+  );
+  assert.ok(
+    packageJson.build.files.includes(
+      "!**/node_modules/node-addon-api/README.md",
+    ),
+  );
+  assert.ok(
+    !packageJson.build.files.includes("!**/node_modules/node-addon-api/**"),
+    "node-addon-api license must not be removed with its build-only files",
+  );
+  assert.ok(
+    packageJson.build.files.every(
+      (pattern) => !/LICENSE|NOTICE|\*\.md/.test(pattern),
+    ),
+    "third-party license and notice files must remain packageable",
+  );
+  // The agent-runtime dist-bundle mapping must remain a directory copy: the
+  // bundle emits dist-bundle/package.json with "type":"module" so the ESM
+  // sidecar.js loads in packaged installs (issue #507). Contract tests live
+  // in agent-runtime-bundle-package.test.mjs.
+  assert.deepEqual(packageJson.build.extraResources, [
+    { from: "../../LICENSE", to: "LICENSE" },
+    { from: "../../NOTICE", to: "NOTICE" },
+    {
+      from: "build/icon.png",
+      to: "tray-icon.png",
+    },
+    {
+      from: "../../packages/agent-runtime/dist-bundle",
+      to: "agent-runtime",
+    },
+    // Built-in skills stay outside the asar so they read as plain files.
+    {
+      from: "resources/skills",
+      to: "skills",
+    },
+    // Bundled first-party plugins, for the same reason: host-core reads their
+    // manifests from disk and the views are loaded as file:// pages (ADR 0105).
+    {
+      from: "resources/plugins",
+      to: "plugins",
+    },
+    {
+      from: "resources/models.dev",
+      to: "models.dev",
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(packageJson.build), /node-pty/);
+});
 
 test("macOS targets follow the native architecture selected by the runner", () => {
   const macTargets = packageJson.build.mac.target;
@@ -182,6 +267,14 @@ test("macOS DMG remains a two-icon install and artifacts omit first-launch guida
 
 test("packaging keeps voice native payloads unpacked and excludes removed PTY payloads", () => {
   assert.deepEqual(packageJson.build.asar, { smartUnpack: false });
+  assert.deepEqual(packageJson.build.asarUnpack, [
+    "node_modules/transcribe-cpp/**/*.node",
+    "node_modules/transcribe-cpp/**/bin/**",
+    "node_modules/@transcribe-cpp/**/*",
+    "node_modules/@koromix/koffi-*/**/*",
+    "node_modules/@picovoice/pvrecorder-node/**/*.node",
+    "node_modules/@picovoice/pvrecorder-node/**/lib/**",
+  ]);
   assert.doesNotMatch(JSON.stringify(packageJson.build.files), /node-pty/);
   assert.doesNotMatch(JSON.stringify(packageJson.build.extraResources), /node-pty/);
 });
