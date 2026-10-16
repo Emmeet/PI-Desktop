@@ -10,7 +10,7 @@ import test, { after } from "node:test";
 const { build } = createRequire(new URL("../../../packages/agent-runtime/package.json", import.meta.url))("esbuild");
 const storageDirectory = fileURLToPath(new URL("../electron/main/storage/", import.meta.url));
 const result = await build({
-  stdin: { contents: ['files', 'preferences', 'bootstrap', 'ipc'].map((name) => `export * from "./${name}";`).join("\n") + '\nexport { IPC } from "@pi-desktop/shared";\nexport { catalogs } from "@pi-desktop/i18n";', resolveDir: storageDirectory, loader: "ts" },
+  stdin: { contents: ['files', 'preferences', 'bootstrap', 'ipc', 'legacy-import'].map((name) => `export * from "./${name}";`).join("\n") + '\nexport { IPC } from "@pi-desktop/shared";\nexport { catalogs } from "@pi-desktop/i18n";', resolveDir: storageDirectory, loader: "ts" },
   bundle: true, platform: "node", format: "esm", write: false,
   plugins: [{ name: "external-storage-boundaries", setup(builder) {
     builder.onResolve({ filter: /^@pi-desktop\/shared$/ }, () => ({ path: fileURLToPath(new URL("../../../packages/shared/src/protocol.ts", import.meta.url)) }));
@@ -26,8 +26,9 @@ const result = await build({
 
 const exitSignal = new Error("test process exited");
 const harness = {
-  anchor: "", selection: null, paths: [], windows: [], errors: [], restarts: 0, hostError: null,
-  app: { getPath: (name) => name === "temp" ? maintenanceTemp : harness.anchor, getLocale: () => "en", setPath: (...value) => harness.paths.push(value), whenReady: async () => {}, relaunch: () => { harness.restarts++; }, exit: () => { throw exitSignal; } },
+  anchor: "", appData: "", selection: null, paths: [], windows: [], errors: [], restarts: 0, hostError: null,
+  commandSwitches: [],
+  app: { commandLine: { hasSwitch: (name) => harness.commandSwitches.includes(name) }, getPath: (name) => name === "temp" ? maintenanceTemp : name === "appData" ? harness.appData : harness.anchor, getLocale: () => "en", setPath: (...value) => harness.paths.push(value), whenReady: async () => {}, relaunch: () => { harness.restarts++; }, exit: () => { throw exitSignal; } },
   dialog: { showOpenDialog: async () => ({ canceled: harness.selection === null, filePaths: [harness.selection] }), showMessageBox: async (...value) => { harness.errors.push(value); return { response: 0 }; } },
   BrowserWindow: class {
     constructor(options) { this.options = options; this.scripts = []; harness.windows.push(this); this.webContents = { setWindowOpenHandler: () => {}, on: () => {}, executeJavaScript: async (script) => { this.scripts.push(script); } }; }
@@ -69,8 +70,8 @@ async function exists(path) {
 const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
 const migrate = (value, overrides = {}) => storage.migrateFiles({ source: value.roots, target: value.target, anchor: value.anchor, id: randomUUID(), progress: () => {}, relocate: async () => {}, ...overrides });
 function resetHarness(anchor) {
-  harness.anchor = anchor; harness.paths = []; harness.windows = []; harness.errors = [];
-  harness.restarts = 0; harness.hostError = null; harness.selection = null;
+  harness.anchor = anchor; harness.appData = anchor; harness.paths = []; harness.windows = []; harness.errors = [];
+  harness.restarts = 0; harness.hostError = null; harness.selection = null; harness.commandSwitches = [];
 }
 function registerHandlers() {
   const handlers = new Map();
@@ -432,4 +433,351 @@ test("settings cache and backup actions run cold maintenance without changing th
   assert.equal(await readFile(join(active.data, "scratch/session/current.md"), "utf8"), "active conversation");
   assert.equal(await readFile(join(active.browser, "Local Storage/current"), "utf8"), "active browser state");
   assert.equal(await exists(file), true);
+});
+
+async function legacyFixture(t, development = false) {
+  const value = await fixture(t);
+  const defaultData = join(value.root, development ? ".omp-desktop-dev" : ".omp-desktop");
+  const appData = join(value.root, "appData");
+  const anchor = join(appData, development ? "OMP-Desktop Dev" : "OMP-Desktop");
+  const source = {
+    data: join(value.root, development ? ".pi-desktop-dev" : ".pi-desktop"),
+    browser: join(appData, development ? "PI-Desktop Dev" : "PI-Desktop"),
+  };
+  await Promise.all([mkdir(anchor, { recursive: true }), mkdir(source.data), mkdir(source.browser, { recursive: true })]);
+  resetHarness(anchor); harness.appData = appData;
+  return { ...value, defaultData, appData, anchor, source };
+}
+const importLegacy = (value, relocate = async () => {}) => storage.importLegacyProfile({
+  defaultData: value.defaultData, appData: value.appData, anchor: value.anchor, relocate,
+});
+
+for (const development of [false, true]) {
+  test(`first ${development ? "development" : "packaged"} start imports durable data without sharing PI roots`, { timeout: 60_000 }, async (t) => {
+    const value = await legacyFixture(t, development);
+    const files = ["pi.sqlite", "pi.sqlite-wal", "pi.sqlite-shm", "sessions/chat.jsonl", "attachments/blob", "secrets/.machine-key", "plugins/data/demo/config.json"];
+    for (const path of files) await put(join(value.source.data, path), `original ${path}`, 0o600);
+    await put(join(value.source.browser, "Local Storage/leveldb/data.ldb"), "browser state");
+    await put(join(value.source.browser, "SingletonLock"), "upstream lock");
+    const before = await Promise.all(files.map((path) => readFile(join(value.source.data, path))));
+    const calls = [];
+    await importLegacy(value, async (...roots) => calls.push(roots));
+    const next = storage.readStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), {});
+    assert.deepEqual(next.roots, { data: join(value.defaultData, "data"), browser: join(value.defaultData, "browser") });
+    assert.deepEqual(next.backups, [], "PI must never become a deletable OMP backup");
+    assert.deepEqual(calls, [[value.source.data, next.roots.data]]);
+    for (const [index, path] of files.entries()) {
+      assert.deepEqual(await readFile(join(next.roots.data, path)), before[index]);
+      assert.deepEqual(await readFile(join(value.source.data, path)), before[index]);
+      assert.equal((await lstat(join(value.source.data, path))).mode & 0o777, 0o600);
+    }
+    assert.equal(await readFile(join(next.roots.browser, "Local Storage/leveldb/data.ldb"), "utf8"), "browser state");
+    assert.equal(await exists(join(next.roots.browser, "SingletonLock")), false);
+    assert.equal(await readFile(join(value.source.browser, "SingletonLock"), "utf8"), "upstream lock");
+    await put(join(next.roots.data, "sessions/chat.jsonl"), "OMP conversation after restart");
+    await put(join(value.source.data, "sessions/chat.jsonl"), "new upstream conversation");
+    await importLegacy(value, async () => assert.fail("a second startup must not import"));
+    await storage.prepareStorage(value.defaultData, false);
+    assert.equal(storage.getStorageBootstrap().preferences.roots.data, next.roots.data);
+    assert.equal(await readFile(join(next.roots.data, "sessions/chat.jsonl"), "utf8"), "OMP conversation after restart");
+  });
+}
+
+test("first-start import failure never publishes partial data and retries only its owned job", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "sessions/chat.jsonl"), "original");
+  await assert.rejects(importLegacy(value, async () => { throw new Error("offline host failed"); }), /offline host failed/);
+  const file = join(value.anchor, storage.STORAGE_PREFERENCE_FILE);
+  assert.equal(await exists(file), false);
+  harness.hostError = new Error("offline host failed");
+  await assert.rejects(storage.prepareStorage(value.defaultData, false), (error) => error === exitSignal);
+  assert.equal(await exists(file), false);
+  assert.equal(harness.paths.length, 0, "partial data must never be activated");
+  assert.equal(await readFile(join(value.source.data, "sessions/chat.jsonl"), "utf8"), "original");
+  harness.hostError = null;
+  await importLegacy(value);
+  assert.equal(await readFile(join(value.defaultData, "data/sessions/chat.jsonl"), "utf8"), "original");
+});
+
+test("first-start import refuses unrelated destination bytes and leaves existing OMP profiles alone", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.defaultData, "sessions/omp.jsonl"), "existing OMP data");
+  await put(join(value.source.data, "sessions/pi.jsonl"), "upstream data");
+  await importLegacy(value, async () => assert.fail("existing OMP data wins"));
+  assert.equal(await readFile(join(value.defaultData, "sessions/omp.jsonl"), "utf8"), "existing OMP data");
+  assert.equal(await exists(join(value.defaultData, "data")), false);
+  assert.equal(await exists(join(value.anchor, "omp-first-start-import.json")), false);
+});
+
+test("explicit data and userData profiles opt out of first-start import", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "sessions/pi.jsonl"), "upstream data");
+  await storage.prepareStorage(value.defaultData, true);
+  assert.equal(await exists(value.defaultData), false);
+  assert.equal(storage.getStorageBootstrap().preferences.roots.data, value.defaultData);
+  harness.commandSwitches = ["user-data-dir"];
+  await storage.prepareStorage(value.defaultData, false);
+  assert.equal(await exists(value.defaultData), false);
+  assert.equal(await exists(join(value.anchor, "omp-first-start-import.json")), false);
+});
+
+test("first-start import uses legacy selected roots but not its pending maintenance or backup ownership", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const selected = { data: value.roots.data, browser: value.roots.browser };
+  await put(join(selected.data, "sessions/selected.jsonl"), "selected conversation");
+  const file = join(value.source.browser, storage.STORAGE_PREFERENCE_FILE);
+  storage.writeStoragePreferences(file, { version: 1, roots: selected, backups: [value.source],
+    pending: { id: randomUUID(), kind: "cache", language: "en" } });
+  const before = await readFile(file);
+  await assert.rejects(importLegacy(value), /pending storage maintenance/);
+  assert.deepEqual(await readFile(file), before);
+  storage.writeStoragePreferences(file, { version: 1, roots: selected, backups: [value.source] });
+  await importLegacy(value);
+  const next = storage.readStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), {});
+  assert.deepEqual(next.backups, []);
+  assert.equal(await readFile(join(next.roots.data, "sessions/selected.jsonl"), "utf8"), "selected conversation");
+});
+
+test("source-tree changes during import reject before relocation, including newly created WAL files", { timeout: 60_000 }, async (t) => {
+  const value = await fixture(t);
+  await put(join(value.roots.data, "pi.sqlite"), "original database bytes");
+  let changed = false; let relocated = false;
+  await assert.rejects(migrate(value, { verifySource: true, progress: (event) => {
+    if (event.stage === "verifying" && !changed) {
+      changed = true;
+      createRequire(import.meta.url)("node:fs").writeFileSync(join(value.roots.data, "pi.sqlite-wal"), "new live WAL");
+    }
+  }, relocate: async () => { relocated = true; } }), /source profile changed/);
+  assert.equal(relocated, false);
+  assert.equal(await readFile(join(value.roots.data, "pi.sqlite"), "utf8"), "original database bytes");
+});
+
+test("data-only legacy import never creates or writes an upstream browser profile", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await rm(value.source.browser, { recursive: true });
+  await put(join(value.source.data, "sessions/chat.jsonl"), "data-only conversation", 0o444);
+  await importLegacy(value);
+  assert.equal(await exists(value.source.browser), false);
+  assert.equal((await lstat(join(value.source.data, "sessions/chat.jsonl"))).mode & 0o777, 0o444);
+  assert.equal(await readFile(join(value.defaultData, "data/sessions/chat.jsonl"), "utf8"), "data-only conversation");
+});
+
+test("an interrupted import rejects unrelated files without deleting them or activating upstream", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "sessions/chat.jsonl"), "upstream conversation");
+  await assert.rejects(importLegacy(value, async () => { throw new Error("interrupted"); }), /interrupted/);
+  await put(join(value.defaultData, "unrelated.txt"), "user-owned file");
+  await assert.rejects(importLegacy(value), /unrelated data/);
+  assert.equal(await readFile(join(value.defaultData, "unrelated.txt"), "utf8"), "user-owned file");
+  assert.equal(await exists(join(value.anchor, storage.STORAGE_PREFERENCE_FILE)), false);
+  assert.equal(await readFile(join(value.source.data, "sessions/chat.jsonl"), "utf8"), "upstream conversation");
+});
+
+test("an existing managed OMP bootstrap owns its pending work and is never replaced by import", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const file = join(value.anchor, storage.STORAGE_PREFERENCE_FILE);
+  storage.writeStoragePreferences(file, { version: 1, roots: value.roots, backups: [],
+    pending: { id: randomUUID(), kind: "cache", language: "en" } });
+  const before = await readFile(file);
+  await importLegacy(value, async () => assert.fail("existing bootstrap owns maintenance"));
+  assert.deepEqual(await readFile(file), before);
+  assert.equal(await exists(value.defaultData), false);
+});
+
+test("a clean first start records its decision and never imports a later PI profile", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await rm(value.source.data, { recursive: true }); await rm(value.source.browser, { recursive: true });
+  await importLegacy(value);
+  await put(join(value.source.data, "sessions/later.jsonl"), "later PI installation");
+  await importLegacy(value, async () => assert.fail("not a first start"));
+  const next = storage.readStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), {});
+  assert.deepEqual(next.roots, { data: value.defaultData, browser: value.anchor });
+  assert.equal(await exists(join(value.defaultData, "data")), false);
+});
+
+test("a default OMP symlink cannot silently reuse the upstream database", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "pi.sqlite"), "upstream database bytes");
+  await symlink(value.source.data, value.defaultData, process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(importLegacy(value), /private directory/);
+  assert.equal(await exists(join(value.anchor, storage.STORAGE_PREFERENCE_FILE)), false);
+  assert.equal(await readFile(join(value.source.data, "pi.sqlite"), "utf8"), "upstream database bytes");
+});
+
+test("retrying import with an unavailable source cannot publish an empty profile", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "sessions/chat.jsonl"), "saved conversation");
+  await assert.rejects(importLegacy(value, async () => { throw new Error("interrupted"); }), /interrupted/);
+  await rm(value.source.data, { recursive: true });
+  await assert.rejects(importLegacy(value), /source is unavailable/);
+  assert.equal(await exists(join(value.anchor, storage.STORAGE_PREFERENCE_FILE)), false);
+  assert.equal(await readFile(join(value.defaultData, "data/sessions/chat.jsonl"), "utf8"), "saved conversation");
+});
+
+test("managed bootstrap imports before activating any Chromium session and selects only OMP paths", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "sessions/chat.jsonl"), "saved conversation");
+  await put(join(value.source.browser, "Local Storage/state"), "saved UI state");
+  const bootstrap = await storage.prepareStorage(value.defaultData, false);
+  assert.equal(bootstrap.managed, true);
+  assert.deepEqual(bootstrap.preferences.roots, { data: join(value.defaultData, "data"), browser: join(value.defaultData, "browser") });
+  assert.deepEqual(harness.paths, [["sessionData", bootstrap.preferences.roots.browser]]);
+  assert.equal(await readFile(join(bootstrap.preferences.roots.data, "sessions/chat.jsonl"), "utf8"), "saved conversation");
+  assert.equal(await readFile(join(bootstrap.preferences.roots.browser, "Local Storage/state"), "utf8"), "saved UI state");
+  assert.equal(harness.restarts, 0);
+  assert.equal(harness.windows.length, 0);
+});
+
+test("unavailable legacy custom storage never falls back to the obsolete upstream default", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.data, "sessions/obsolete.jsonl"), "obsolete upstream default");
+  const selected = { data: join(value.root, "disconnected/data"), browser: join(value.root, "disconnected/browser") };
+  const file = join(value.source.browser, storage.STORAGE_PREFERENCE_FILE);
+  storage.writeStoragePreferences(file, { version: 1, roots: selected, backups: [] });
+  const before = await readFile(file);
+  await assert.rejects(importLegacy(value), /unavailable/);
+  assert.deepEqual(await readFile(file), before);
+  assert.equal(await exists(value.defaultData), false);
+  assert.equal(await exists(join(value.anchor, storage.STORAGE_PREFERENCE_FILE)), false);
+});
+
+test("browser-only legacy import never creates an upstream data directory", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await rm(value.source.data, { recursive: true });
+  await put(join(value.source.browser, "Local Storage/state"), "saved UI state");
+  await importLegacy(value);
+  assert.equal(await exists(value.source.data), false);
+  assert.equal(await readFile(join(value.defaultData, "browser/Local Storage/state"), "utf8"), "saved UI state");
+});
+
+for (const [kind, path] of [["secrets", "secrets"], ["browser", "Local Storage"]]) {
+  test(`first-start import rejects shared ${kind} symbolic links before publication`, { timeout: 60_000 }, async (t) => {
+    const value = await legacyFixture(t);
+    const external = join(value.root, "external-shared-storage");
+    await put(join(external, "preserve.txt"), "shared upstream bytes");
+    const root = kind === "browser" ? value.source.browser : value.source.data;
+    await symlink(external, join(root, path), process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(importLegacy(value, async () => assert.fail("unsafe links must not reach relocation")), /symbolic links/);
+    assert.equal(await exists(join(value.anchor, storage.STORAGE_PREFERENCE_FILE)), false);
+    assert.equal(await readFile(join(external, "preserve.txt"), "utf8"), "shared upstream bytes");
+    assert.equal(await realpath(join(root, path)), await realpath(external));
+  });
+}
+
+for (const existingPreferences of [false, true]) {
+  test(`aliased OMP browser anchor is rejected before any source write (${existingPreferences ? "existing pointer" : "new profile"})`, { timeout: 60_000 }, async (t) => {
+    const value = await legacyFixture(t);
+    if (existingPreferences) storage.writeStoragePreferences(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE), {
+      version: 1, roots: value.source, backups: [],
+    });
+    await put(join(value.source.browser, "source-sentinel"), "original browser bytes");
+    const fs = createRequire(import.meta.url)("node:fs");
+    const before = fs.readdirSync(value.source.browser).sort();
+    const preference = existingPreferences ? await readFile(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE)) : null;
+    await rm(value.anchor, { recursive: true });
+    await symlink(value.source.browser, value.anchor, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(importLegacy(value), /anchor must be a private directory/);
+    await assert.rejects(storage.prepareStorage(value.defaultData, false), (error) => error === exitSignal);
+    assert.deepEqual(fs.readdirSync(value.source.browser).sort(), before);
+    assert.equal(await readFile(join(value.source.browser, "source-sentinel"), "utf8"), "original browser bytes");
+    if (preference) assert.deepEqual(await readFile(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE)), preference);
+    assert.equal(await exists(value.defaultData), false);
+    assert.equal(harness.paths.length, 0);
+  });
+}
+
+test("an existing OMP pointer cannot activate upstream SQLite or browser roots", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const file = join(value.anchor, storage.STORAGE_PREFERENCE_FILE);
+  storage.writeStoragePreferences(file, { version: 1, roots: value.source, backups: [] });
+  const before = await readFile(file);
+  await assert.rejects(importLegacy(value), /overlaps the PI-Desktop installation/);
+  await assert.rejects(storage.prepareStorage(value.defaultData, false), (error) => error === exitSignal);
+  assert.deepEqual(await readFile(file), before);
+  assert.equal(harness.paths.length, 0);
+  assert.equal(await exists(join(value.anchor, "omp-first-start-import.json")), false);
+});
+
+test("an OMP anchor nested under upstream storage is rejected before directory creation", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const anchor = join(value.source.browser, "nested-omp-anchor");
+  await assert.rejects(storage.importLegacyProfile({ ...value, anchor, relocate: async () => {} }), /overlaps the PI-Desktop installation/);
+  assert.equal(await exists(anchor), false);
+  assert.equal(await exists(value.defaultData), false);
+  assert.equal(await exists(join(value.source.browser, "omp-first-start-import.json")), false);
+});
+
+test("existing OMP pointers are checked against legacy custom roots before activation", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const selected = { data: value.roots.data, browser: value.roots.browser };
+  storage.writeStoragePreferences(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE), { version: 1, roots: selected, backups: [] });
+  storage.writeStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), { version: 1, roots: selected, backups: [] });
+  await assert.rejects(importLegacy(value), /overlaps the PI-Desktop installation/);
+  assert.equal(await exists(join(value.anchor, "omp-first-start-import.json")), false);
+});
+
+for (const profile of ["private-data", "private-pointer", "imported"]) {
+  test(`established OMP ${profile} starts with malformed upstream preferences`, { timeout: 60_000 }, async (t) => {
+    const value = await legacyFixture(t);
+    let active = { data: value.defaultData, browser: value.anchor };
+    if (profile === "imported") {
+      await put(join(value.source.data, "sessions/chat.jsonl"), "original imported conversation");
+      await importLegacy(value);
+      active = storage.readStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), {}).roots;
+    } else if (profile === "private-pointer") {
+      active = value.roots;
+      storage.writeStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), { version: 1, roots: active, backups: [] });
+    }
+    await put(join(active.data, "sessions/chat.jsonl"), "OMP conversation must survive");
+    await put(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE), "{broken JSON");
+    const bootstrap = await storage.prepareStorage(value.defaultData, false);
+    assert.deepEqual(bootstrap.preferences.roots, active);
+    assert.equal(await readFile(join(active.data, "sessions/chat.jsonl"), "utf8"), "OMP conversation must survive");
+    assert.deepEqual(harness.paths, [["sessionData", active.browser]]);
+    assert.equal(harness.errors.length, 0);
+  });
+}
+
+test("a genuine first-start import still refuses malformed upstream preferences", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await put(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE), "{broken JSON");
+  await assert.rejects(importLegacy(value), SyntaxError);
+  assert.equal(await exists(value.defaultData), false);
+  assert.equal(await exists(join(value.anchor, "omp-first-start-import.json")), false);
+  assert.equal(await exists(join(value.anchor, storage.STORAGE_PREFERENCE_FILE)), false);
+});
+
+test("a completed import journal rejects its original custom source even when upstream preferences break", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const selected = value.roots;
+  const sourcePreference = join(value.source.browser, storage.STORAGE_PREFERENCE_FILE);
+  storage.writeStoragePreferences(sourcePreference, { version: 1, roots: selected, backups: [] });
+  await put(join(selected.data, "sessions/chat.jsonl"), "upstream custom conversation");
+  await importLegacy(value);
+  await put(sourcePreference, "{broken upstream JSON");
+  storage.writeStoragePreferences(join(value.anchor, storage.STORAGE_PREFERENCE_FILE), { version: 1, roots: selected, backups: [] });
+  await assert.rejects(importLegacy(value), /overlaps the PI-Desktop installation/);
+  assert.equal(await readFile(join(selected.data, "sessions/chat.jsonl"), "utf8"), "upstream custom conversation");
+});
+
+test("damaged current OMP preferences are never swallowed with damaged upstream preferences", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  const file = join(value.anchor, storage.STORAGE_PREFERENCE_FILE);
+  await put(file, "{broken OMP JSON");
+  await put(join(value.source.browser, storage.STORAGE_PREFERENCE_FILE), "{broken upstream JSON");
+  await assert.rejects(importLegacy(value), SyntaxError);
+  assert.equal(await readFile(file, "utf8"), "{broken OMP JSON");
+  assert.equal(await exists(value.defaultData), false);
+});
+
+test("data-only completed import journal retains its private browser on restart", { timeout: 60_000 }, async (t) => {
+  const value = await legacyFixture(t);
+  await rm(value.source.browser, { recursive: true });
+  await put(join(value.source.data, "sessions/chat.jsonl"), "source conversation");
+  await importLegacy(value);
+  await put(join(value.defaultData, "data/sessions/chat.jsonl"), "OMP conversation");
+  const bootstrap = await storage.prepareStorage(value.defaultData, false);
+  assert.deepEqual(bootstrap.preferences.roots, { data: join(value.defaultData, "data"), browser: join(value.defaultData, "browser") });
+  assert.equal(await readFile(join(bootstrap.preferences.roots.data, "sessions/chat.jsonl"), "utf8"), "OMP conversation");
+  assert.equal(await exists(value.source.browser), false);
 });

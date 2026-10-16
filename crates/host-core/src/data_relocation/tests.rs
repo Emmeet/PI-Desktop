@@ -389,3 +389,153 @@ fn refuses_colliding_project_capability_keys_without_losing_an_override() {
     assert!(relocate(&source, &destination).is_err());
     assert_eq!(fs::read(file).unwrap(), before);
 }
+
+#[test]
+fn imports_committed_wal_into_the_copy_without_touching_any_source_bytes() {
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join(".pi-desktop");
+    let destination = temporary.path().join(".omp-desktop");
+    fs::create_dir_all(&source).unwrap();
+    let database = Database::open_in_dir(&source).unwrap();
+    database
+        .conn()
+        .execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;")
+        .unwrap();
+    database.conn().execute("INSERT INTO projects(path,name,created_at,last_opened_at) VALUES (?1,'WAL-only committed project',0,0)", [source.join("project").to_string_lossy()]).unwrap();
+    let names = ["pi.sqlite", "pi.sqlite-wal", "pi.sqlite-shm"];
+    let before: Vec<_> = names
+        .iter()
+        .map(|name| fs::read(source.join(name)).unwrap())
+        .collect();
+    assert!(
+        !before[1].is_empty(),
+        "fixture requires an uncheckpointed WAL"
+    );
+    copy_directory(&source, &destination);
+    relocate(&source, &destination).unwrap();
+    // No SQLite source connection is opened by relocation, and even the live
+    // source shared-memory bytes must remain exactly as they were.
+    for (name, bytes) in names.iter().zip(&before) {
+        assert_eq!(
+            fs::read(source.join(name)).unwrap(),
+            *bytes,
+            "source {name}"
+        );
+    }
+    let imported = Connection::open(destination.join("pi.sqlite")).unwrap();
+    let (path, name): (String, String) = imported
+        .query_row("SELECT path,name FROM projects", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(path, destination.join("project").to_string_lossy());
+    assert_eq!(name, "WAL-only committed project");
+    drop(imported);
+    let restarted = Database::open_in_dir(&destination).unwrap();
+    let persisted: String = restarted
+        .conn()
+        .query_row("SELECT name FROM projects", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(persisted, "WAL-only committed project");
+    drop(restarted);
+    drop(database);
+}
+
+#[test]
+fn rejects_a_corrupt_private_database_without_mutating_the_original() {
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("old");
+    let destination = temporary.path().join("new");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("pi.sqlite"), b"not a sqlite database").unwrap();
+    copy_directory(&source, &destination);
+    let original = fs::read(source.join("pi.sqlite")).unwrap();
+    assert!(relocate(&source, &destination).is_err());
+    assert_eq!(fs::read(source.join("pi.sqlite")).unwrap(), original);
+    assert!(!source.join("pi.sqlite-wal").exists());
+    assert!(!source.join("pi.sqlite-shm").exists());
+}
+
+#[test]
+fn cross_install_import_resets_only_the_copied_device_id_not_credentials_or_key() {
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("old");
+    let destination = temporary.path().join("imported");
+    let moved = temporary.path().join("moved");
+    let identity_ref = "secret:installation:oauth-device-id";
+    let identity = uuid::Uuid::new_v4().to_string();
+    let store = SecretStore::open(&source).unwrap();
+    store.set(identity_ref, &identity).unwrap();
+    store
+        .set("secret:provider:test:oauth", "account-credential-fixture")
+        .unwrap();
+    drop(store);
+    let source_files: Vec<_> = fs::read_dir(source.join("secrets"))
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), fs::read(entry.path()).unwrap())
+        })
+        .collect();
+    copy_directory(&source, &destination);
+    copy_directory(&source, &moved);
+    import_profile(&source, &destination).unwrap();
+    let copied = SecretStore::open(&destination).unwrap();
+    assert_eq!(copied.get(identity_ref).unwrap(), None);
+    assert_eq!(
+        copied.get("secret:provider:test:oauth").unwrap().as_deref(),
+        Some("account-credential-fixture")
+    );
+    assert_eq!(
+        fs::read(destination.join("secrets/.machine-key")).unwrap(),
+        fs::read(source.join("secrets/.machine-key")).unwrap()
+    );
+    let new_identity = uuid::Uuid::new_v4().to_string();
+    copied.set(identity_ref, &new_identity).unwrap();
+    assert_ne!(copied.get(identity_ref).unwrap().unwrap(), identity);
+    for (name, bytes) in source_files {
+        assert_eq!(fs::read(source.join("secrets").join(name)).unwrap(), bytes);
+    }
+    assert_eq!(
+        SecretStore::open(&source)
+            .unwrap()
+            .get(identity_ref)
+            .unwrap(),
+        Some(identity.clone())
+    );
+    // A storage move retains the installation identity; only cross-install
+    // import uses the new CLI mode and clears its private copy.
+    relocate(&source, &moved).unwrap();
+    assert_eq!(
+        SecretStore::open(&moved)
+            .unwrap()
+            .get(identity_ref)
+            .unwrap(),
+        Some(identity)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cross_install_import_rejects_shared_secret_links_before_touching_them() {
+    use std::os::unix::fs::symlink;
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("old");
+    let destination = temporary.path().join("imported");
+    let store = SecretStore::open(&source).unwrap();
+    store
+        .set("secret:installation:oauth-device-id", "original-device")
+        .unwrap();
+    fs::create_dir_all(&destination).unwrap();
+    let key = fs::read(source.join("secrets/.machine-key")).unwrap();
+    symlink(source.join("secrets"), destination.join("secrets")).unwrap();
+    assert!(import_profile(&source, &destination).is_err());
+    assert_eq!(
+        store
+            .get("secret:installation:oauth-device-id")
+            .unwrap()
+            .as_deref(),
+        Some("original-device")
+    );
+    assert_eq!(fs::read(source.join("secrets/.machine-key")).unwrap(), key);
+}

@@ -33,11 +33,10 @@ test("a development build owns a different data directory than the shipped app",
     join(home, DEVELOPMENT_DATA_DIR_NAME),
   );
 
-  // A shipped installation must keep the directory its users already have, so
-  // the split can only have moved the development side.
-  assert.equal(INSTALLATION_DATA_DIR_NAME, ".pi-desktop");
-  assert.equal(DEVELOPMENT_DATA_DIR_NAME, ".pi-desktop-dev");
-  assert.equal(DEVELOPMENT_INSTALLATION_NAME, "PI-Desktop Dev");
+  // Neither OMP installation may share upstream PI's data root or lock identity.
+  assert.equal(INSTALLATION_DATA_DIR_NAME, ".omp-desktop");
+  assert.equal(DEVELOPMENT_DATA_DIR_NAME, ".omp-desktop-dev");
+  assert.equal(DEVELOPMENT_INSTALLATION_NAME, "OMP-Desktop Dev");
 });
 
 test("PI_DESKTOP_DATA_DIR still overrides either profile", () => {
@@ -74,7 +73,7 @@ test("an explicit data directory reaches the child processes as an absolute path
   );
 });
 
-test("applyDevelopmentUserData sets userData unless --user-data-dir is set", () => {
+test("installation userData is OMP-specific unless --user-data-dir is set", () => {
   const calls = [];
   const app = {
     commandLine: { hasSwitch: () => false },
@@ -87,7 +86,8 @@ test("applyDevelopmentUserData sets userData unless --user-data-dir is set", () 
   ]);
   calls.length = 0;
   applyDevelopmentUserData(app, false);
-  assert.equal(calls.length, 0);
+  assert.deepEqual(calls, [["userData", join("/tmp/appData", "OMP-Desktop")]]);
+  calls.length = 0;
   applyDevelopmentUserData(
     { ...app, commandLine: { hasSwitch: (name) => name === "user-data-dir" } },
     true,
@@ -114,11 +114,11 @@ test("a development build takes its own userData before the single-instance lock
   // assertions against the developer's own state instead.
   assert.match(
     pathsSource,
-    /if \(development && !app\.commandLine\.hasSwitch\("user-data-dir"\)\) \{/,
+    /if \(app\.commandLine\.hasSwitch\("user-data-dir"\)\) return;/,
   );
   assert.match(
     pathsSource,
-    /app\.setPath\(\s*"userData",\s*join\(app\.getPath\("appData"\), DEVELOPMENT_INSTALLATION_NAME\)/,
+    /join\(app\.getPath\("appData"\), development \? DEVELOPMENT_INSTALLATION_NAME : APP_NAME\)/,
   );
 
   // The two profiles are told apart by the same verdict everywhere, and it is

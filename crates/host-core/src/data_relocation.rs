@@ -13,14 +13,43 @@ mod tests;
 
 pub fn run_cli() -> Result<bool> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.first().is_none_or(|arg| arg != "--relocate-data") {
+    let Some(mode) = args.first() else {
+        return Ok(false);
+    };
+    if mode != "--relocate-data" && mode != "--import-data" {
         return Ok(false);
     }
     if args.len() != 3 {
-        bail!("usage: pi-desktop-host-core --relocate-data <old-root> <copied-root>");
+        bail!(
+            "usage: pi-desktop-host-core [--relocate-data|--import-data] <old-root> <copied-root>"
+        );
     }
-    relocate(Path::new(&args[1]), Path::new(&args[2]))?;
+    if mode == "--import-data" {
+        import_profile(Path::new(&args[1]), Path::new(&args[2]))?;
+    } else {
+        relocate(Path::new(&args[1]), Path::new(&args[2]))?;
+    }
     Ok(true)
+}
+
+/// Cross-install import differs from a move: no writable aliases or local ID
+/// may be shared with the original installation. Credentials keep their key.
+fn import_profile(source: &Path, destination: &Path) -> Result<()> {
+    for entry in walkdir::WalkDir::new(destination).follow_links(false) {
+        if entry?.file_type().is_symlink() {
+            bail!("imported application storage must not contain symbolic links");
+        }
+    }
+    relocate(source, destination)?;
+    if regular_directory(&destination.join("secrets"))?
+        && regular_file(&destination.join("secrets/.machine-key"))?
+    {
+        crate::secrets::SecretStore::open(destination)?
+            .delete("secret:installation:oauth-device-id")?;
+        #[cfg(unix)]
+        fs::File::open(destination.join("secrets"))?.sync_all()?;
+    }
+    Ok(())
 }
 
 struct Roots {
@@ -330,6 +359,12 @@ fn relocate_database(roots: &Roots) -> Result<()> {
     }
     let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    // WAL replay and validation happen only on the private copy, never the
+    // upstream database or its shared-memory sidecar.
+    let integrity: String = connection.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if integrity != "ok" {
+        bail!("copied database failed integrity verification: {integrity}");
+    }
     let transaction = connection.transaction()?;
     for (table, column, json) in [
         ("projects", "path", false),

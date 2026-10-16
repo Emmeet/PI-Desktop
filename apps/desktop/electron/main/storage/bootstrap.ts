@@ -8,6 +8,7 @@ import { catalogs, resolveLocale } from "@pi-desktop/i18n";
 import type { StorageProgress } from "@pi-desktop/shared";
 import { resolveHostBinary } from "../host-process";
 import { clearCaches, migrateFiles, removeBackups } from "./files";
+import { importLegacyProfile } from "./legacy-import";
 import { readStoragePreferences, STORAGE_PREFERENCE_FILE, writeStoragePreferences, type StoragePreferences } from "./preferences";
 
 export type StorageBootstrap = { file: string; anchor: string; managed: boolean; preferences: StoragePreferences };
@@ -21,16 +22,22 @@ const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": 
 /** Runs before creating any application service or writer. userData remains the stable lock anchor. */
 export async function prepareStorage(defaultData: string, overridden: boolean): Promise<StorageBootstrap> {
   const anchor = app.getPath("userData");
-  mkdirSync(anchor, { recursive: true });
   const file = join(anchor, STORAGE_PREFERENCE_FILE);
   const defaults = { data: defaultData, browser: anchor };
   let preferences: StoragePreferences;
   try {
+    if (!overridden && !app.commandLine.hasSwitch("user-data-dir")) {
+      await importLegacyProfile({ defaultData, anchor, appData: app.getPath("appData"),
+        relocate: async (oldRoot, newRoot) => {
+          await promisify(execFile)(resolveHostBinary(), ["--import-data", oldRoot, newRoot], { timeout: 30 * 60_000, maxBuffer: 1024 * 1024 });
+        } });
+    }
+    mkdirSync(anchor, { recursive: true });
     preferences = overridden ? { version: 1, roots: defaults, backups: [] }
       : readStoragePreferences(file, defaults);
     if (!overridden && preferences.roots.data !== defaults.data
       && (!existsSync(preferences.roots.data) || !existsSync(preferences.roots.browser))) {
-      throw new Error("The selected storage directory is unavailable. Reconnect its drive before starting PI-Desktop.");
+      throw new Error("The selected storage directory is unavailable. Reconnect its drive before starting OMP-Desktop.");
     }
   } catch (error) {
     await app.whenReady();

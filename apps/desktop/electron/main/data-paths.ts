@@ -2,34 +2,16 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { APP_NAME } from "@pi-desktop/shared";
 
-/**
- * The two directories that define an installation, and the development split
- * between them.
- *
- * A packaged PI-Desktop and a `pnpm dev` host used to share both: the
- * name-derived `userData` — where Electron keeps the single-instance lock,
- * renderer `localStorage`, and the plugin panel partitions — and
- * `~/.pi-desktop`, where host-core keeps `pi.sqlite` beside the persistence
- * outbox and the log tree. Sharing them meant a shipped app that was already
- * running held the lock, so the development launch quit on arrival; a
- * development host that won the race instead put a second host-core over the
- * same single-writer database, which is the divergence D236 exists to
- * prevent. Neither is workable while someone debugs against the app they use.
- *
- * Only the development side moves, and only these two names differ. A shipped
- * installation keeps `PI-Desktop` and `~/.pi-desktop`, so no upgrade relocates
- * a user's database, secrets, plugins, or renderer-local state, and
- * `PI_DESKTOP_DATA_DIR` still overrides either profile outright.
- */
+/** OMP owns both its Chromium lock/profile and host storage, separately from PI. */
 
 /** `userData` directory of a development installation, beside the shipped one. */
 export const DEVELOPMENT_INSTALLATION_NAME = `${APP_NAME} Dev`;
 
 /** Data directory of a shipped installation, below the user's home. */
-export const INSTALLATION_DATA_DIR_NAME = ".pi-desktop";
+export const INSTALLATION_DATA_DIR_NAME = ".omp-desktop";
 
 /** Data directory of a development installation, below the user's home. */
-export const DEVELOPMENT_DATA_DIR_NAME = ".pi-desktop-dev";
+export const DEVELOPMENT_DATA_DIR_NAME = ".omp-desktop-dev";
 
 export type DataDirInput = {
   /** `PI_DESKTOP_DATA_DIR`; an explicit directory wins over either profile. */
@@ -96,19 +78,17 @@ export type UserDataApp = {
 };
 
 /**
- * Give a development build its own `userData` so the single-instance lock
- * does not collide with a shipped app that is already running (D236, ADR 0094).
- * An explicit `--user-data-dir` wins, because that is how the E2E harnesses
- * point a build at a throwaway profile.
+ * Set the OMP installation's userData before requesting the single-instance lock.
+ * Both packaged and development names are independent of upstream PI-Desktop.
+ * An explicit `--user-data-dir` wins for isolated profiles and E2E harnesses.
  */
 export function applyDevelopmentUserData(
   app: UserDataApp,
   development: boolean,
 ): void {
-  if (development && !app.commandLine.hasSwitch("user-data-dir")) {
-    app.setPath(
-      "userData",
-      join(app.getPath("appData"), DEVELOPMENT_INSTALLATION_NAME),
-    );
-  }
+  if (app.commandLine.hasSwitch("user-data-dir")) return;
+  app.setPath(
+    "userData",
+    join(app.getPath("appData"), development ? DEVELOPMENT_INSTALLATION_NAME : APP_NAME),
+  );
 }

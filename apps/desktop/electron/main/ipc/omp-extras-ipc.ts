@@ -16,6 +16,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { IPC, type ComposerCommand } from "@pi-desktop/shared";
 import type { IpcRegistrar } from "./types";
 import { bunBinary, ompPackageDir, runOmp, runOmpConfig } from "../omp-capability-sync";
+import { desktopDataDir } from "../data-paths";
 
 export const MCP_OAUTH_HELPER = `
 const pkg = process.env.OMP_PKG_DIR;
@@ -78,11 +79,9 @@ export type OmpMcpOAuthEvent =
   | { kind: "authUrl"; url: string }
   | { kind: "progress"; message: string };
 
-const OAUTH_MARKER = join(homedir(), ".pi-desktop", "omp-mcp-oauth.json");
-
 function readMarker(): string[] {
   try {
-    const value = JSON.parse(readFileSync(OAUTH_MARKER, "utf8"));
+    const value = JSON.parse(readFileSync(join(desktopDataDir(), "omp-mcp-oauth.json"), "utf8"));
     return Array.isArray(value) ? value.map(String) : [];
   } catch {
     return [];
@@ -147,8 +146,8 @@ export async function runOmpMcpOAuth(url: string, onEvent: (event: OmpMcpOAuthEv
       if (result?.ok) {
         const marked = readMarker();
         if (!marked.includes(url)) {
-          mkdirSync(join(homedir(), ".pi-desktop"), { recursive: true });
-          writeFileSync(OAUTH_MARKER, JSON.stringify([...marked, url], null, 2));
+          mkdirSync(desktopDataDir(), { recursive: true });
+          writeFileSync(join(desktopDataDir(), "omp-mcp-oauth.json"), JSON.stringify([...marked, url], null, 2));
         }
         resolve();
       } else {

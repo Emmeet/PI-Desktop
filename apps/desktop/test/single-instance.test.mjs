@@ -175,6 +175,6 @@ test("development installation applies its separate profile before requesting th
   const pathIndex = value.calls.findIndex(([kind, path]) => kind === "path" && path === "userData");
   const lockIndex = value.calls.findIndex(([kind]) => kind === "lock");
   assert.ok(pathIndex > 0 && pathIndex < lockIndex);
-  assert.equal(value.calls[pathIndex][2].endsWith("PI-Desktop Dev"), true);
-  assert.equal(value.installation.defaultDataDir.endsWith(".pi-desktop-dev"), true);
+  assert.equal(value.calls[pathIndex][2].endsWith("OMP-Desktop Dev"), true);
+  assert.equal(value.installation.defaultDataDir.endsWith(".omp-desktop-dev"), true);
 });

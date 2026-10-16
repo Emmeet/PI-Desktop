@@ -85,6 +85,8 @@ export async function migrateFiles(input: {
   source: StorageRoots; target: string; anchor: string; id: string;
   progress: (value: StorageProgress) => void;
   relocate: (oldRoot: string, newRoot: string) => Promise<void>;
+  /** First-start imports may observe another installation; reject every source-tree change. */
+  verifySource?: boolean;
 }): Promise<StorageRoots> {
   const { source, anchor, id, progress, relocate } = input;
   const requestedTarget = resolve(input.target);
@@ -106,11 +108,20 @@ export async function migrateFiles(input: {
   const entries: Entry[] = [];
   const state: StorageProgress = { stage: "scanning", completedBytes: 0, totalBytes: 0, completedFiles: 0, totalFiles: 0 };
   progress({ ...state });
+  if (input.verifySource && !(await optionalStat(source.data))) throw new Error("The source profile is unavailable; import was not completed.");
   if (await optionalStat(source.data)) await inventory(await realpath(source.data), next.data, entries);
   else entries.push({ from: source.data, to: next.data, kind: "directory", bytes: 0, mode: 0o700 });
   await inventory(await realpath(source.browser), next.browser, entries, true);
+  if (input.verifySource && entries.some((entry) => entry.kind === "link")) {
+    throw new Error("First-start import cannot retain symbolic links in writable application storage. Replace them with private files or directories and retry.");
+  }
   state.totalBytes = entries.reduce((sum, entry) => sum + entry.bytes, 0);
   state.totalFiles = entries.filter((entry) => entry.kind !== "directory").length;
+  const sourceSnapshot = input.verifySource ? JSON.stringify(entries) : undefined;
+  const sourceHashes = new Map<string, string>();
+  if (input.verifySource) {
+    for (const entry of entries) if (entry.kind === "file") sourceHashes.set(entry.from, await digest(entry.from));
+  }
   const space = await statfs(target);
   if (space.bavail * space.bsize < state.totalBytes + 16 * 1024 * 1024) throw new Error("Not enough free space in the destination directory.");
   const mappings: Array<[string, string]> = [[source.data, next.data], [source.browser, next.browser],
@@ -134,6 +145,9 @@ export async function migrateFiles(input: {
         },
       }), createWriteStream(entry.to, { flags: "wx", mode: 0o600 }));
       hashes.set(entry.from, hash.digest("hex"));
+      if (input.verifySource && hashes.get(entry.from) !== sourceHashes.get(entry.from)) {
+        throw new Error("The source profile changed during import. Close PI-Desktop and retry.");
+      }
       const file = await open(entry.to, "r+");
       try { await file.sync(); } finally { await file.close(); }
       await chmod(entry.to, entry.mode & 0o777);
@@ -153,6 +167,16 @@ export async function migrateFiles(input: {
       state.completedFiles++;
     }
     progress({ ...state });
+  }
+  if (input.verifySource) {
+    const observed: Entry[] = [];
+    if (await optionalStat(source.data)) await inventory(await realpath(source.data), next.data, observed);
+    else observed.push({ from: source.data, to: next.data, kind: "directory", bytes: 0, mode: 0o700 });
+    await inventory(await realpath(source.browser), next.browser, observed, true);
+    if (JSON.stringify(observed) !== sourceSnapshot) throw new Error("The source profile changed during import. Close PI-Desktop and retry.");
+    for (const [path, hash] of sourceHashes) {
+      if (await digest(path) !== hash) throw new Error("The source profile changed during import. Close PI-Desktop and retry.");
+    }
   }
   state.stage = "relocating"; progress({ ...state });
   if (await optionalStat(source.data)) await relocate(source.data, next.data);

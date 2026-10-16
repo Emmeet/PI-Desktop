@@ -10,7 +10,7 @@
 //!    the same way it already bypasses parent `.gitignore` rules.
 //! 3. Workspace rules: a gitignore-style `.pi-desktopignore` at the workspace
 //!    root, honored by unscoped walks.
-//! 4. User global rules: `<data_dir>/ignore` (`~/.pi-desktop/ignore` by
+//! 4. User global rules: `<data_dir>/ignore` (`~/.omp-desktop/ignore` by
 //!    default), honored by unscoped walks.
 
 use ignore::WalkBuilder;
@@ -123,7 +123,15 @@ pub fn workspace_ignore_file(ignore_root: &Path) -> Option<PathBuf> {
 pub fn user_global_ignore_file() -> Option<PathBuf> {
     let data_dir = std::env::var_os("PI_DESKTOP_DATA_DIR")
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".pi-desktop")))?;
+        .or_else(|| {
+            dirs::home_dir().map(|home| {
+                home.join(if std::env::var("PI_DESKTOP_DEV").as_deref() == Ok("1") {
+                    ".omp-desktop-dev"
+                } else {
+                    ".omp-desktop"
+                })
+            })
+        })?;
     let candidate = data_dir.join("ignore");
     candidate.is_file().then_some(candidate)
 }
