@@ -1,5 +1,5 @@
 import { cancelOmpHostRequests, handleOmpHostRequest } from "../omp-host-tools";
-import { IPC, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
+import { IPC, normalizeOmpApprovalMode, type AppSettings, type AgentEventEnvelope, type UiMessage } from "@pi-desktop/shared";
 import {
   findSubagentProviderSource,
   modelConfigWithBinding,
@@ -237,8 +237,9 @@ export function createSidecarRuntime({
       return;
     }
     if (method === "native.notice") {
-      const { message } = params as { message?: string };
-      if (message) sendToRenderer(IPC.event.toast, { message: `omp: ${message}` });
+      const notice = params as { message?: string; code?: string; attempt?: number; maxAttempts?: number; delayMs?: number };
+      if (notice.message || notice.code) sendToRenderer(IPC.event.toast, { message: notice.message ? `omp: ${notice.message}` : notice.code,
+        code: notice.code, attempt: notice.attempt, maxAttempts: notice.maxAttempts, delayMs: notice.delayMs });
       return;
     }
     if (method === "native.host.request") {
@@ -745,11 +746,13 @@ export function createSidecarRuntime({
   });
   runtimeState.sidecar = s;
   if (runtimeState.host) s.setHost(runtimeState.host);
+  const settings = await runtimeState.host?.call<AppSettings>("settings.get");
   await s.call("sidecar.configure", {
     hostBinary: runtimeState.host?.binaryPath,
     dataDir,
     networkProxy: currentNetworkProxy(),
     systemProxyRelayUrl: currentSystemProxyRelayUrl(),
+    ompApprovalMode: normalizeOmpApprovalMode(settings?.ompApprovalMode),
   });
   logger.app("runtime", "info", "agent sidecar configured");
   };

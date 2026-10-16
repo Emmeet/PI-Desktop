@@ -1,4 +1,4 @@
-import { IPC, type UpdatePreference } from "@pi-desktop/shared";
+import { IPC, isOmpApprovalMode, normalizeOmpApprovalMode, type UpdatePreference } from "@pi-desktop/shared";
 import type { AgentSidecar } from "../agent-sidecar";
 import type { HostProcess } from "../host-process";
 import type { IpcRegistrar } from "./types";
@@ -72,6 +72,10 @@ export function registerSettingsIpc({
   handle(IPC.invoke.settingsSet, async (settings: unknown) => {
     if (!host) throw new Error("host unavailable");
     const validatedSettings = validateSettingsWrite(settings);
+    if (validatedSettings && typeof validatedSettings === "object" && "ompApprovalMode" in validatedSettings &&
+      !isOmpApprovalMode(validatedSettings.ompApprovalMode)) {
+      throw Object.assign(new Error("ompApprovalMode is invalid"), { errorCode: "INVALID_PARAMS" });
+    }
     const currentSettings = await host.call<AppSettings>("settings.get");
     const prospectiveSettings = validatedSettings && typeof validatedSettings === "object" && !Array.isArray(validatedSettings)
       ? { ...currentSettings, ...(validatedSettings as Partial<AppSettings>) }
@@ -105,6 +109,7 @@ export function registerSettingsIpc({
           dataDir,
           networkProxy: currentNetworkProxy(),
           systemProxyRelayUrl: currentSystemProxyRelayUrl(),
+          ompApprovalMode: normalizeOmpApprovalMode(result.ompApprovalMode),
         });
       } catch {
         // Sidecar will pick up PI_DESKTOP_PROXY_JSON on the next spawn.

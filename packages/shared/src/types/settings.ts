@@ -11,6 +11,7 @@ import type { SpeechSettings } from "./speech.js";
 import type { ThinkingLevel } from "./models.js";
 import type { UpdatePreference } from "./platform.js";
 import type { LiveVoiceSettings } from "./live-voice.js";
+import type { OmpApprovalMode } from "../omp-approval.js";
 
 export type ThemePreference = "system" | "light" | "dark" | `plugin:${string}`;
 
@@ -38,6 +39,8 @@ export type JevKeyCheckResult = {
 export type CloseBehavior = "ask" | "tray" | "quit";
 
 export type AppSettings = {
+  /** Desktop-launched omp tool policy. Absent means write; global omp config is unchanged. */
+  ompApprovalMode?: OmpApprovalMode;
   imageGeneration?: import("../image-generation.js").ImageGenerationBinding | null;
   /** All models marked for image generation; absent falls back to imageGeneration. */
   imageGenerationModels?: import("../image-generation.js").ImageGenerationBinding[] | null;
@@ -132,7 +135,7 @@ export type AppSettings = {
   linkOpenTarget?: LinkOpenTarget;
   /**
    * Which context figure the composer ring and its summary lead with (D398).
-   * `remaining` (default, absent) counts down from 100%; `used` counts up.
+   * `used` (default, absent) counts up; explicit `remaining` counts down from 100%.
    * Color thresholds always follow remaining capacity, so the warning state
    * does not change meaning with this preference.
    */

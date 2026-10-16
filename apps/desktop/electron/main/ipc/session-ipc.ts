@@ -4,6 +4,9 @@ import { mkdirSync } from "node:fs";
 import {
   ErrorCodes,
   IPC,
+  isOmpApprovalMode,
+  normalizeOmpApprovalMode,
+  type AppSettings,
   modelConfigImportKey,
   publicModelConfigCandidate,
   draftMatchesExisting,
@@ -25,6 +28,7 @@ import type { HostProcess } from "../host-process";
 import type { Logger } from "../logger";
 import type { PersistenceOutbox } from "../persistence-outbox";
 import type { PluginRuntime } from "../plugin-runtime";
+import { runOmpConfig } from "../omp-capability-sync";
 import { readSessionCollaboration } from "../services/session-collaboration";
 import { searchSessionsAcrossSources } from "../services/session-search";
 import type { IpcRegistrar } from "./types";
@@ -105,22 +109,23 @@ export type SessionIpcDependencies = {
 };
 
 /** omp sidecar methods the renderer may call directly. */
-const OMP_RENDERER_CALLS = new Set([
-  "omp.subagents.list",
-  "omp.session.command",
-  "omp.subagents.cancel",
-  "omp.subagents.steer",
-  "omp.subagents.messages",
-  "omp.commands",
-  "omp.tree",
-  "omp.stats",
-  "omp.login.providers",
-  "omp.login.start",
-  "omp.login.respond",
-  "omp.login.cancel",
-  "omp.logout.accounts",
-  "omp.logout",
-]);
+const OMP_RENDERER_CALLS: Record<string, true> = {
+  "omp.capability.check": true,
+  "omp.subagents.list": true,
+  "omp.session.command": true,
+  "omp.subagents.cancel": true,
+  "omp.subagents.steer": true,
+  "omp.subagents.messages": true,
+  "omp.commands": true,
+  "omp.tree": true,
+  "omp.stats": true,
+  "omp.login.providers": true,
+  "omp.login.start": true,
+  "omp.login.respond": true,
+  "omp.login.cancel": true,
+  "omp.logout.accounts": true,
+  "omp.logout": true,
+};
 
 export function registerSessionIpc({
   registrar,
@@ -227,31 +232,40 @@ export function registerSessionIpc({
     return sidecar.call("omp.roles.set", { role: input.role, model: typeof input.model === "string" ? input.model : null });
   });
   handle(IPC.invoke.ompApprovalGet, async () => {
-    const read = async (key: string) => (JSON.parse(await (await import("../omp-capability-sync")).runOmpConfig(["get", key, "--json"])) as { value?: unknown }).value;
-    const mode = await read("tools.approvalMode");
-    const rules = await read("tools.approval");
+    if (!host) throw new Error("host unavailable");
+    const settings = await host.call<AppSettings>("settings.get");
+    const configured: { value?: unknown } = JSON.parse(await runOmpConfig(["get", "tools.approval", "--json"]));
+    const rules = configured.value;
     return {
-      mode: typeof mode === "string" ? mode : "yolo",
+      mode: normalizeOmpApprovalMode(settings.ompApprovalMode),
       rules: rules && typeof rules === "object" && !Array.isArray(rules) ? rules : {},
     };
   });
   handle(IPC.invoke.ompApprovalSet, async (input: { mode?: unknown; rules?: unknown } = {}) => {
-    if (input.mode !== undefined) {
-      if (input.mode !== "always-ask" && input.mode !== "write" && input.mode !== "yolo") {
-        throw Object.assign(new Error("Unknown approval mode"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
-      }
-      await (await import("../omp-capability-sync")).runOmpConfig(["set", "tools.approvalMode", input.mode]);
+    if (!host) throw new Error("host unavailable");
+    if (input.mode !== undefined && !isOmpApprovalMode(input.mode)) {
+      throw Object.assign(new Error("Unknown approval mode"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
     }
+    let clean: Record<string, string> | undefined;
     if (input.rules !== undefined) {
-      const rules = input.rules && typeof input.rules === "object" && !Array.isArray(input.rules) ? input.rules as Record<string, unknown> : null;
-      const clean: Record<string, string> = {};
-      for (const [tool, policy] of Object.entries(rules ?? {})) {
+      if (!input.rules || typeof input.rules !== "object" || Array.isArray(input.rules)) {
+        throw Object.assign(new Error("Approval rules must be an object"), { errorCode: ErrorCodes.INVALID_ARGUMENT });
+      }
+      clean = {};
+      for (const [tool, policy] of Object.entries(input.rules)) {
         if (!/^[\w.:-]{1,80}$/.test(tool) || (policy !== "allow" && policy !== "prompt" && policy !== "deny")) {
           throw Object.assign(new Error(`Invalid approval rule for ${tool}`), { errorCode: ErrorCodes.INVALID_ARGUMENT });
         }
         clean[tool] = policy;
       }
-      await (await import("../omp-capability-sync")).runOmpConfig(["set", "tools.approval", JSON.stringify(clean)]);
+    }
+    // Validate the entire request before changing either storage domain.
+    if (clean) {
+      await runOmpConfig(["set", "tools.approval", JSON.stringify(clean)]);
+    }
+    if (input.mode !== undefined) {
+      await host.call("settings.set", { ompApprovalMode: input.mode });
+      await sidecar?.call("sidecar.configure", { ompApprovalMode: input.mode });
     }
     // Running chats keep the policy they started with; idle ones restart with the new one.
     await sidecar?.call("omp.runtimes.recycle", {}).catch(() => undefined);
@@ -276,7 +290,7 @@ export function registerSessionIpc({
   handle(IPC.invoke.ompCall, async (input: { method?: string; params?: Record<string, unknown> } = {}) => {
     if (!sidecar) throw new Error("agent sidecar unavailable");
     const method = String(input?.method ?? "");
-    if (!OMP_RENDERER_CALLS.has(method)) {
+    if (!Object.hasOwn(OMP_RENDERER_CALLS, method)) {
       throw Object.assign(new Error(`omp call not allowed: ${method}`), { errorCode: "INVALID_ARGUMENT" });
     }
     const params = input?.params && typeof input.params === "object" ? input.params : {};

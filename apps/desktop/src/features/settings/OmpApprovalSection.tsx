@@ -1,22 +1,19 @@
 import { useEffect, useState } from "react";
+import type { OmpApprovalMode } from "@pi-desktop/shared";
 import { useTranslation } from "react-i18next";
 import { api } from "../../lib/api";
 import { useAppStore } from "../../stores/app-store";
-import { Button } from "../../components/ui";
+import { Button, Input } from "../../components/ui";
+import { SettingsMenuSelect } from "../../components/settings/SettingsMenuSelect";
 import { SettingsCard, SettingsRow } from "./primitives";
 
-type Mode = "always-ask" | "write" | "yolo";
 type Policy = "allow" | "prompt" | "deny";
 
-/**
- * omp tool approvals, stored by omp (`tools.approvalMode` and `tools.approval`
- * in ~/.omp/agent/config.yml) and edited through `omp config set`. Idle chats
- * pick the change up on their next message; a running reply keeps its policy.
- */
+/** Desktop owns the mode; explicit per-tool rules remain managed by omp. */
 export function OmpApprovalSection() {
   const { t } = useTranslation();
   const showToast = useAppStore((s) => s.showToast);
-  const [mode, setMode] = useState<Mode | null>(null);
+  const [mode, setMode] = useState<OmpApprovalMode | null>(null);
   const [rules, setRules] = useState<Record<string, Policy>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,16 +21,29 @@ export function OmpApprovalSection() {
   const [newPolicy, setNewPolicy] = useState<Policy>("allow");
 
   useEffect(() => {
+    let disposed = false;
     api.ompApprovalGet()
-      .then((result) => { setMode(result.mode); setRules(result.rules); })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .then((result) => {
+        if (!disposed) { setMode(result.mode); setRules(result.rules); }
+      })
+      .catch((e) => {
+        if (!disposed) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => { disposed = true; };
   }, []);
 
-  const save = async (input: { mode?: Mode; rules?: Record<string, Policy> }) => {
+  const save = async (input: { mode?: OmpApprovalMode; rules?: Record<string, Policy> }) => {
     setBusy(true);
     try {
       await api.ompApprovalSet(input);
-      if (input.mode) setMode(input.mode);
+      if (input.mode) {
+        setMode(input.mode);
+        // Other settings rows save snapshots: do not let a later row restore
+        // the mode that was loaded before this independently persisted change.
+        useAppStore.setState((state) => state.settings
+          ? { settings: { ...state.settings, ompApprovalMode: input.mode } }
+          : {});
+      }
       if (input.rules) setRules(input.rules);
       return true;
     } catch (e) {
@@ -44,39 +54,37 @@ export function OmpApprovalSection() {
     }
   };
 
-  const policyLabel = (policy: Policy) => t(`settings.ompApproval.policy.${policy}`);
+  const policyOptions = (["allow", "prompt", "deny"] as const).map((policy) => ({
+    id: policy, label: t(`settings.ompApproval.policy.${policy}`),
+  }));
 
   return (
     <div data-omp-approval="true">
       <SettingsCard title={t("settings.ompApproval.title")} description={t("settings.ompApproval.description")}>
         {error ? <SettingsRow title={t("settings.ompApproval.error")}>{error}</SettingsRow> : null}
         <SettingsRow title={t("settings.ompApproval.mode")}>
-          <select
-            className="settings-select"
-            data-omp-approval-mode="true"
-            value={mode ?? ""}
-            disabled={busy || mode === null}
-            onChange={(e) => void save({ mode: e.target.value as Mode })}
-          >
-            {mode === null ? <option value="">…</option> : null}
-            {(["always-ask", "write", "yolo"] as const).map((value) => (
-              <option key={value} value={value}>{t(`settings.ompApproval.modes.${value}`)}</option>
-            ))}
-          </select>
+          <div data-omp-approval-mode="true">
+            <SettingsMenuSelect
+              value={mode ?? ""}
+              options={(["always-ask", "write", "yolo"] as const).map((value) => ({
+                id: value, label: t(`settings.ompApproval.modes.${value}`),
+              }))}
+              label={t("settings.ompApproval.mode")}
+              disabled={busy || mode === null}
+              onChange={(value) => void save({ mode: value as OmpApprovalMode })}
+            />
+          </div>
         </SettingsRow>
         {Object.entries(rules).map(([tool, policy]) => (
           <SettingsRow key={tool} title={tool}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }} data-omp-approval-rule={tool}>
-              <select
-                className="settings-select"
+              <SettingsMenuSelect
                 value={policy}
+                options={policyOptions}
+                label={tool}
                 disabled={busy}
-                onChange={(e) => void save({ rules: { ...rules, [tool]: e.target.value as Policy } })}
-              >
-                {(["allow", "prompt", "deny"] as const).map((value) => (
-                  <option key={value} value={value}>{policyLabel(value)}</option>
-                ))}
-              </select>
+                onChange={(value) => void save({ rules: { ...rules, [tool]: value as Policy } })}
+              />
               <Button
                 variant="ghost"
                 disabled={busy}
@@ -93,18 +101,20 @@ export function OmpApprovalSection() {
         ))}
         <SettingsRow title={t("settings.ompApproval.addRule")} description={t("settings.ompApproval.addRuleHint")}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input
-              className="settings-input"
+            <Input
               data-omp-approval-new-tool="true"
+              aria-label={t("settings.ompApproval.addRule")}
               placeholder="bash"
               value={newTool}
               onChange={(e) => setNewTool(e.target.value)}
             />
-            <select className="settings-select" value={newPolicy} onChange={(e) => setNewPolicy(e.target.value as Policy)}>
-              {(["allow", "prompt", "deny"] as const).map((value) => (
-                <option key={value} value={value}>{policyLabel(value)}</option>
-              ))}
-            </select>
+            <SettingsMenuSelect
+              value={newPolicy}
+              options={policyOptions}
+              label={t("settings.ompApproval.addRule")}
+              onChange={(value) => setNewPolicy(value as Policy)}
+              disabled={busy}
+            />
             <Button
               style={{ whiteSpace: "nowrap" }}
               disabled={busy || !/^[\w.:-]{1,80}$/.test(newTool.trim())}

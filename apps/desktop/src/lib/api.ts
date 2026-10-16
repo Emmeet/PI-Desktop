@@ -27,6 +27,7 @@ import type {
   PendingInteractiveRequests,
   AgentInstructionFile,
   AppSettings,
+  OmpApprovalMode,
   JevKeyCheckResult,
   CommandShellCatalog,
   AppVersionInfo,
@@ -129,6 +130,8 @@ import {
   defaultCommandShellForPlatform,
   IPC,
   isCommandShellId,
+  isOmpApprovalMode,
+  normalizeOmpApprovalMode,
   normalizeLargePasteThreshold,
   normalizeMode,
   normalizeNetworkProxy,
@@ -360,6 +363,7 @@ export type SessionHistoryReadOptions = {
 export function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
+    ompApprovalMode: normalizeOmpApprovalMode(settings.ompApprovalMode),
     defaultMode: normalizeMode((settings as { defaultMode?: unknown }).defaultMode),
     infiniteProviderRetry:
       (settings as { infiniteProviderRetry?: unknown }).infiniteProviderRetry === true,
@@ -384,6 +388,9 @@ export function normalizeSettings(settings: AppSettings): AppSettings {
 }
 
 export function validateSettingsWrite(settings: AppSettings): AppSettings {
+  if (settings.ompApprovalMode !== undefined && !isOmpApprovalMode(settings.ompApprovalMode)) {
+    throw Object.assign(new Error("ompApprovalMode is invalid"), { errorCode: "INVALID_PARAMS" });
+  }
   if (
     settings.thinkingDisplayMode !== undefined &&
     settings.thinkingDisplayMode !== "detailed" &&
@@ -634,8 +641,8 @@ export const api = {
   ompSetRole: (input: { role: string; model: string | null }) =>
     invoke<{ roles: OmpRole[] }>(IPC.invoke.ompRoleSet, input),
   ompApprovalGet: () =>
-    invoke<{ mode: "always-ask" | "write" | "yolo"; rules: Record<string, "allow" | "prompt" | "deny"> }>(IPC.invoke.ompApprovalGet, {}),
-  ompApprovalSet: (input: { mode?: "always-ask" | "write" | "yolo"; rules?: Record<string, "allow" | "prompt" | "deny"> }) =>
+    invoke<{ mode: OmpApprovalMode; rules: Record<string, "allow" | "prompt" | "deny"> }>(IPC.invoke.ompApprovalGet, {}),
+  ompApprovalSet: (input: { mode?: OmpApprovalMode; rules?: Record<string, "allow" | "prompt" | "deny"> }) =>
     invoke<{ ok: boolean }>(IPC.invoke.ompApprovalSet, input),
   ompPlanGet: (sessionId: string) =>
     invoke<{ enabled: boolean }>(IPC.invoke.ompPlanGet, { sessionId }),
@@ -1677,11 +1684,12 @@ export const api = {
       listener(payload as TrustedExtensionStatusEvent),
     );
   },
-  onToast: (listener: (message: string) => void) => {
+  onToast: (listener: (message: string, notice?: { code?: string; attempt?: number; maxAttempts?: number; delayMs?: number }) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
-    return window.piDesktop.on(IPC.event.toast, (payload) =>
-      listener((payload as { message: string }).message),
-    );
+    return window.piDesktop.on(IPC.event.toast, (payload) => {
+      const notice = payload as { message: string; code?: string; attempt?: number; maxAttempts?: number; delayMs?: number };
+      listener(notice.message, notice);
+    });
   },
   onInsecureEndpointNotice: (listener: (payload: { host: string }) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
