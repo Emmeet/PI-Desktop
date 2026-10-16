@@ -1,8 +1,14 @@
+> **OMP Desktop** 基于 [vastsa/PI-Desktop v0.18.0](https://github.com/vastsa/PI-Desktop/tree/v0.18.0)，
+> 修改为使用 [oh-my-pi (`omp`)](https://github.com/can1357/oh-my-pi) 作为唯一 Agent 引擎。
+> 保留上游 **LGPL-3.0** 许可和来源声明，详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
+> 含 OMP Desktop 修改的对应公开源码：[Emmeet/PI-Desktop](https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support)。
+> 下文保留的上游发布链接不是 OMP Desktop 安装包；构建本分支请参阅[英文运行说明](README.md#running-with-omp-oh-my-pi)。
+
 <div align="center">
 
-<img src="docs/image/readme/logo.png" alt="PI-Desktop" width="108" />
+<img src="docs/image/readme/logo.png" alt="上游 PI-Desktop 标志" width="108" />
 
-# PI-Desktop
+# OMP Desktop
 
 ### 可拆卸的 AI Agent 桌面工作台
 
@@ -12,18 +18,13 @@
 
 <br />
 
-[![Release](https://img.shields.io/github/v/release/vastsa/PI-Desktop?label=release)](https://github.com/vastsa/PI-Desktop/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/vastsa/PI-Desktop/total?label=downloads)](https://github.com/vastsa/PI-Desktop/releases)
-[![Stars](https://img.shields.io/github/stars/vastsa/PI-Desktop?style=flat\&label=stars)](https://github.com/vastsa/PI-Desktop/stargazers)
-[![CI](https://github.com/vastsa/PI-Desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/vastsa/PI-Desktop/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/vastsa/PI-Desktop)](LICENSE)
-[![Reddit](https://img.shields.io/badge/Reddit-r%2FAIUO-FF4500?logo=reddit\&logoColor=white)](https://www.reddit.com/r/AIUO/)
-[![QQ 群：点击加入 PI-Desktop 开发者交流群](https://img.shields.io/badge/QQ-%E5%8A%A0%E5%85%A5%E5%BC%80%E5%8F%91%E8%80%85%E4%BA%A4%E6%B5%81%E7%BE%A4-12B7F5?logo=tencentqq&logoColor=white)](https://qm.qq.com/q/iWP8i0XxIc)
+[![源码](https://img.shields.io/badge/source-Emmeet%2FPI--Desktop-blue)](https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support)
+[![License: LGPL-3.0](https://img.shields.io/badge/license-LGPL--3.0-blue)](LICENSE)
 
 <br />
 
-**[立即下载](https://github.com/vastsa/PI-Desktop/releases/latest)** ·
-[使用文档](https://pi-docs.aiuo.net/) ·
+**[构建 OMP Desktop](README.md#running-with-omp-oh-my-pi)** ·
+[上游使用文档](https://pi-docs.aiuo.net/) ·
 [插件开发](docs/plugin-development.md) ·
 [界面预览](docs/guide/screenshots.md) ·
 [English](README.md)
@@ -40,11 +41,11 @@
 
 ---
 
-## 为什么是 PI-Desktop？
+## 为什么是 OMP Desktop？
 
 终端 Agent 擅长执行，IDE Agent 擅长嵌入编辑器。
 
-PI-Desktop 想做得更进一步：
+OMP Desktop 在 PI-Desktop 的工作台之上继续构建：
 
 > **给 AI Agent 一个独立、长期、可扩展的桌面工作空间。**
 
@@ -103,7 +104,7 @@ Subagent 与 Worker Session 可以承担独立任务并行工作。
 </div>
 
 > [!NOTE]
-> **PI-Desktop 目前仍处于 Early Preview。** 已可用于真实开发工作流，部分 API、插件接口与桌面能力仍在持续演进。
+> **OMP Desktop 目前仍处于 Early Preview。** 已可用于真实开发工作流，部分 API、插件接口与桌面能力仍在持续演进。
 
 > **当前发布线：0.18.x（Early Preview）。**
 
@@ -740,9 +741,11 @@ PI-Desktop 的开发过程中使用了来自多个 Provider 的模型。
 
 ## License
 
-PI-Desktop 使用 **GNU Lesser General Public License v3.0**。
-
-详见 [LICENSE](LICENSE)。
+OMP Desktop 保留 PI-Desktop 的 **GNU Lesser General Public License v3.0（LGPL-3.0）**。
+本项目基于 **vastsa/PI-Desktop v0.18.0**，OMP Desktop 修改的对应源码在
+[公开 fork](https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support) 中维护。
+详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。分发二进制时须提供与该二进制具体修订对应的源码，
+并保留上游许可与来源声明。
 
 ---
 
@@ -767,3 +770,28 @@ PI-Desktop 使用 **GNU Lesser General Public License v3.0**。
 <sub>Local-first · Model-agnostic · Plugin-powered</sub>
 
 </div>
+
+## OMP Desktop 就绪度修复（未发布）
+
+- 独立使用 `~/.omp-desktop` / `~/.omp-desktop-dev` 与 `OMP-Desktop` / `OMP-Desktop Dev`，
+  不与上游共用数据库或锁。首次启动前先退出 PI-Desktop；新的受管理 OMP profile 可只读复制
+  并校验上游 host/浏览器状态。已有 OMP 数据及显式根目录/profile 不覆盖，上游保留作手动恢复。
+- 增加仅手动触发、仅构建产物的原生 Windows x64 CI：NSIS、Portable EXE、ZIP 使用不同命名，
+  包含 LICENSE/NOTICE 并验证原生依赖及临时 host 握手。禁止跨平台/架构不匹配打包。
+  不发布 Release；GitHub 派发需要预先注册 workflow。Linux 检查不能替代真实 Windows 验证。
+- 桌面审批模式独立保存，默认为 `write`，可选 `always-ask` / `write` / `yolo`，下一次回复生效，
+  不改变用户全局 omp 审批模式；按工具的共享规则仍保留。原生宿主工具仍需独立明确同意。
+- 要求稳定版 omp `>=18.10.0 <19.0.0` 和 RPC 协议版本 1；崩溃后按 250 ms、1 s、4 s 重连，
+  保留排队工作，不自动重放投递不确定的消息。耗尽后用既有“继续”操作重试新连接。
+- 生产 CSP 使用精确哈希 import map/本地插件模块，禁止通用内联/eval 脚本和任意环回端口；
+  IPC 校验已注册原始主框架，并区分 invoke/事件允许列表。渲染器扩展仍是可信进程内代码。
+- 上下文环默认显示已用容量，显式剩余偏好不变，窗口以精确 OMP `provider/model` 元数据为准。
+  改善任务名称初始焦点/必填提示、五秒删除确认与基于 OMP 可用模型的新手引导；
+  设置导航明确使用非拖拽控件，并增加坐标/滚动回归场景。
+- 补齐德语、西班牙语、法语、韩语、巴西葡语、土耳其语真实缺失文案；九种语言均提供
+  安装/兼容/恢复/新手指引。修复 ADR 格式与中英文 OMP 规格和端到端场景镜像。
+- 自动更新仍须显式开启，安装包仍未签名；语音不在范围内。StepFun 真实角色/功能、实体
+  截图/全局快捷键及提供商授权需与 fixture 测试分开记录。详见[英文运行说明](README.md#running-with-omp-oh-my-pi)、
+  [存储规格](docs/zh-CN/spec/03-runtime/04-data-storage.md#omp-desktop-隔离与首次导入)及
+  [Windows 构建通道](docs/zh-CN/spec/06-delivery/06-release-runbook.md#omp-desktop-windows-仅产物构建通道)。
+

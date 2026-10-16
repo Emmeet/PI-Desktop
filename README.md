@@ -1,13 +1,14 @@
-> **This fork: OMP Desktop.** This branch (`feat/omp-support` on
-> [Emmeet/PI-Desktop](https://github.com/Emmeet/PI-Desktop)) turns PI-Desktop
-> into a desktop app for [oh-my-pi (`omp`)](https://github.com/can1357/oh-my-pi).
-> omp is the only agent engine. See [Running with omp](#running-with-omp-oh-my-pi).
+> **OMP Desktop** is based on [vastsa/PI-Desktop v0.18.0](https://github.com/vastsa/PI-Desktop/tree/v0.18.0),
+> modified to use [oh-my-pi (`omp`)](https://github.com/can1357/oh-my-pi) as its only agent engine.
+> The original **LGPL-3.0** license and upstream attribution are preserved; see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+> Corresponding public source, including the OMP Desktop modifications: [Emmeet/PI-Desktop](https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support).
+> See [Running with omp](#running-with-omp-oh-my-pi). Upstream releases linked elsewhere below are not OMP Desktop builds.
 
 <div align="center">
 
-<img src="docs/image/readme/logo.png" alt="PI-Desktop" width="108" />
+<img src="docs/image/readme/logo.png" alt="Upstream PI-Desktop logo" width="108" />
 
-# PI-Desktop
+# OMP Desktop
 
 ### A modular desktop workspace for AI agents
 
@@ -17,17 +18,13 @@ Local-first · Model-agnostic · Plugin-powered · macOS / Windows / Linux
 
 <br />
 
-[![Release](https://img.shields.io/github/v/release/vastsa/PI-Desktop?label=release)](https://github.com/vastsa/PI-Desktop/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/vastsa/PI-Desktop/total?label=downloads)](https://github.com/vastsa/PI-Desktop/releases)
-[![Stars](https://img.shields.io/github/stars/vastsa/PI-Desktop?style=flat\&label=stars)](https://github.com/vastsa/PI-Desktop/stargazers)
-[![CI](https://github.com/vastsa/PI-Desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/vastsa/PI-Desktop/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/vastsa/PI-Desktop)](LICENSE)
-[![Reddit](https://img.shields.io/badge/Reddit-r%2FAIUO-FF4500?logo=reddit\&logoColor=white)](https://www.reddit.com/r/AIUO/)
+[![Source](https://img.shields.io/badge/source-Emmeet%2FPI--Desktop-blue)](https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support)
+[![License: LGPL-3.0](https://img.shields.io/badge/license-LGPL--3.0-blue)](LICENSE)
 
 <br />
 
-**[Download](https://github.com/vastsa/PI-Desktop/releases/latest)** ·
-[Documentation](https://pi-docs.aiuo.net/) ·
+**[Build OMP Desktop](#running-with-omp-oh-my-pi)** ·
+[Upstream documentation](https://pi-docs.aiuo.net/) ·
 [Build a Plugin](docs/plugin-development.md) ·
 [Screenshots](docs/guide/screenshots.md) ·
 [简体中文](README.zh-CN.md)
@@ -46,11 +43,11 @@ Local-first · Model-agnostic · Plugin-powered · macOS / Windows / Linux
 
 ---
 
-## Why PI-Desktop?
+## Why OMP Desktop?
 
 Terminal agents are great at execution. IDE agents are great at living inside an editor.
 
-PI-Desktop goes one step further:
+OMP Desktop builds on PI-Desktop's workspace:
 
 > **Give AI agents a persistent, independent, and extensible desktop workspace of their own.**
 
@@ -741,9 +738,11 @@ Thanks to every human contributor — and every model that helped us build it.
 
 ## License
 
-PI-Desktop is licensed under the **GNU Lesser General Public License v3.0**.
-
-See [LICENSE](LICENSE) for details.
+OMP Desktop preserves PI-Desktop's **GNU Lesser General Public License v3.0 (LGPL-3.0)**.
+It is based on **vastsa/PI-Desktop v0.18.0**, with OMP Desktop modifications maintained in the
+[public source fork](https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support).
+See [LICENSE](LICENSE) and [NOTICE](NOTICE). Distributors must provide the corresponding source
+for the exact binary revision and preserve the upstream license and notices.
 
 ---
 
@@ -781,14 +780,15 @@ models, and credentials; the app never reads omp's secrets.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash        # Bun, if you don't have it
-bun install -g @oh-my-pi/pi-coding-agent        # provides the `omp` command
+bun install -g @oh-my-pi/pi-coding-agent@18     # stable >=18.10.0 <19.0.0
 omp --version
 ```
 
 Then set up a model the way omp normally does: run `omp` once in a terminal and
 log in (`/login`), or export a provider API key, or define providers in
 `~/.omp/agent/models.yml`. If plain `omp` can chat in a terminal, the desktop
-app can too.
+app can use the same setup. Startup also checks the stable OMP 18 version range
+and RPC protocol version 1; incompatible versions fail with recovery guidance.
 
 ### 2. Build and run the app from source
 
@@ -804,8 +804,13 @@ pnpm dev                          # or: cd apps/desktop && pnpm build && npx ele
 Or use the launcher, which builds anything missing and starts the app:
 
 ```bash
-scripts/run-omp-desktop.sh                       # add OMP_DESKTOP_NO_SANDBOX=1 in containers/VMs
+scripts/run-omp-desktop.sh
 ```
+
+Only a disposable source-development container that cannot support Chromium's
+sandbox may explicitly set `OMP_DESKTOP_NO_SANDBOX=1`. The launcher rejects
+production/installed use; packaged OMP Desktop never reads this variable.
+Do not use it for Windows installation or ordinary desktop launches.
 
 ### How it works
 
@@ -857,12 +862,25 @@ scripts/run-omp-desktop.sh                       # add OMP_DESKTOP_NO_SANDBOX=1 
   Shift+Tab thinking cycling, Alt+M model selection, F5 retry and Escape interrupt.
   Customize them in Shortcuts. Menus, dialogs and IME retain their own keys.
 - Models, logins, tools, extensions, and compaction all come from omp itself.
+- **Tool approvals** default to `write` in desktop settings. Choose `always-ask`,
+  `write` or `yolo` for the next reply without changing global omp approval mode.
+  Existing per-tool rules remain shared with omp; native host tools still require
+  their separate explicit desktop consent.
+- **Crash recovery** retries after 250 ms, 1 s and 4 s, resuming the same saved
+  session and retaining queued work. An uncertain in-flight message is never
+  replayed automatically; inspect history before resending. After exhaustion,
+  the existing Continue action retries a fresh connection with the queue retained.
+- **Context usage** defaults to used capacity across the ring, tooltip, details
+  and accessibility label. Explicit remaining-capacity preferences stay unchanged.
+  Exact OMP `provider/model` context metadata wins over a reported session window.
+- **Provider onboarding** checks OMP's available models and links to Accounts &
+  subscriptions; embedded-provider rows do not falsely hide setup guidance.
 
 ### Environment variables
 
 | Variable | Purpose |
 | --- | --- |
-| `PI_DESKTOP_OMP_BIN` | Full path to the `omp` executable. Without it the app searches `PATH`, `~/.bun/bin`, `~/.local/bin`, `/usr/local/bin`, and `/opt/homebrew/bin`. |
+| `PI_DESKTOP_OMP_BIN` | Full path to the `omp` executable. Without it the app searches `PATH` and usual Bun/local locations. Windows checks `omp.exe` / `omp.cmd`, `%USERPROFILE%\.bun\bin`, `%APPDATA%\npm` and `%LOCALAPPDATA%\pnpm`. |
 | `PI_DESKTOP_OMP_AGENT_DIR` | Use a different omp agent directory (default `~/.omp/agent`, or `PI_CODING_AGENT_DIR`). |
 | `PI_DESKTOP_OMP_MODEL` | Optional default `provider/model` for new chats. It is used only until you pick a model in the app. |
 | `PI_DESKTOP_OMP_PREFS` | Path to the app's preferences file (default `~/.config/omp-desktop/preferences.json`). |
@@ -894,3 +912,35 @@ error that includes these install instructions.
   preserving genuine cancelled zero-tool agents.
 - Replaced the MCP menu's timed second-click removal with explicit confirmation
   and retryable errors. Completed OMP copy in all nine shipped languages.
+
+### OMP Desktop readiness changes (unreleased)
+
+- Isolated OMP host roots (`~/.omp-desktop` / `~/.omp-desktop-dev`) and Electron
+  identities (`OMP-Desktop` / `OMP-Desktop Dev`) prevent shared locks/databases
+  with upstream. Close PI-Desktop before first launch: a fresh managed OMP profile
+  may import a verified read-only copy of upstream host/browser state. Existing
+  OMP profiles and explicit root/profile overrides are never overwritten; upstream
+  stays intact for manual recovery. See the [storage contract](docs/spec/03-runtime/04-data-storage.md#omp-first-start-import).
+- Added native Windows x64 artifact-only CI and package verification; NSIS,
+  Portable EXE and ZIP use distinct names. Packages carry LICENSE and NOTICE.
+  Cross-platform/mismatched-architecture packaging is rejected. The workflow is
+  dispatch-only, creates no release and needs GitHub workflow registration before
+  dispatch. Native Windows execution remains a separately recorded qualification,
+  not a claim inferred from Linux checks. See the [Windows lane](docs/spec/06-delivery/06-release-runbook.md#omp-desktop-windows-artifact-only-lane).
+- Added desktop-only safer approval defaults, stable OMP version/protocol checks,
+  bounded crash recovery with preserved queue and no uncertain-message replay.
+- Tightened production CSP to a hashed static import map/local plugin modules,
+  removed arbitrary loopback connectivity, and enforced registered main-frame IPC
+  ownership plus separate invoke/event allowlists. Renderer extensions remain
+  trusted in-process code and must come from trusted sources.
+- Corrected default context-use display and model-window selection; improved
+  keyboard task creation, visible required-name guidance, five-second delete
+  confirmation and OMP-based provider onboarding. Settings navigation uses explicit
+  non-draggable controls and coordinate/scroll regression scenarios.
+- Filled genuine missing German, Spanish, French, Korean, Brazilian Portuguese
+  and Turkish copy, with localized recovery/setup messages in all nine catalogs.
+  Repaired the ADR catalog and English/Chinese OMP spec/scenario mirrors.
+- Automatic updates stay opt-in, binaries remain unsigned, and voice work is
+  excluded. Live StepFun roles/features, physical screenshot/global-key delivery
+  and real provider authorization must be recorded separately from fixture tests.
+

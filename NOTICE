@@ -1,0 +1,26 @@
+OMP Desktop
+===========
+
+OMP Desktop is based on vastsa/PI-Desktop v0.18.0:
+https://github.com/vastsa/PI-Desktop/tree/v0.18.0
+
+The upstream PI-Desktop authors and contributors retain their rights and
+attribution. The original GNU Lesser General Public License version 3
+(LGPL-3.0), provided in LICENSE, is preserved for this modified work.
+
+The OMP Desktop modifications integrate oh-my-pi (omp) as the agent engine
+and adapt desktop sessions, settings, native tools, storage isolation,
+packaging, security and localization. This is a modified fork, not an
+upstream PI-Desktop release.
+
+Corresponding public source for OMP Desktop, including build scripts and
+modifications:
+https://github.com/Emmeet/PI-Desktop
+https://github.com/Emmeet/PI-Desktop/tree/feat/omp-support
+
+When distributing a binary, provide its exact source revision from this
+public fork together with the corresponding source/build instructions,
+LICENSE and this NOTICE. A moving branch alone does not identify the exact
+source revision of a binary. Preserve all applicable upstream and third-party
+license and copyright notices. Third-party components remain under their
+respective licenses; this notice does not replace those terms.

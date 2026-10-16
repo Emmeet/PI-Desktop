@@ -1,7 +1,7 @@
 {
   "name": "@pi-desktop/desktop",
   "version": "0.18.0",
-  "desktopName": "pi-desktop.desktop",
+  "desktopName": "omp-desktop.desktop",
   "private": true,
   "description": "OMP Desktop: Electron app for the oh-my-pi (omp) coding agent",
   "homepage": "https://github.com/Emmeet/PI-Desktop",
@@ -22,13 +22,13 @@
     "test": "node --test test/*.test.mjs",
     "lint": "node ../../scripts/check-style-tokens.mjs",
     "clean": "node -e \"fs.rmSync('out',{recursive:true,force:true});fs.rmSync('dist',{recursive:true,force:true})\"",
-    "build:host-release": "cargo build --release --manifest-path ../../Cargo.toml -p host-core",
+    "build:host-release": "cargo build --release --locked --manifest-path ../../Cargo.toml -p host-core",
     "bundle:runtime": "pnpm -C ../../packages/agent-runtime bundle",
     "pack": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && electron-builder --dir",
     "dist": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && node ../../scripts/build-desktop-release.mjs",
-    "dist:mac": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && electron-builder --mac --publish never",
+    "dist:mac": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && node ../../scripts/build-desktop-release.mjs mac",
     "dist:win": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && node ../../scripts/build-desktop-release.mjs win",
-    "dist:linux": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && electron-builder --linux --publish never"
+    "dist:linux": "pnpm run build:deps && pnpm run build:host-release && pnpm run bundle:runtime && electron-vite build && node ../../scripts/build-desktop-release.mjs linux"
   },
   "dependencies": {
     "@picovoice/pvrecorder-node": "1.2.9",
@@ -121,6 +121,14 @@
     ],
     "extraResources": [
       {
+        "from": "../../LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "../../NOTICE",
+        "to": "NOTICE"
+      },
+      {
         "from": "build/icon.png",
         "to": "tray-icon.png"
       },
@@ -158,8 +166,8 @@
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "PI-Desktop needs local network access so agents can reach OpenAI-compatible providers, Ollama, and other AI endpoints running on your LAN. / PI-Desktop 需要本地网络访问权限，以便助手请求同一局域网中的 OpenAI 兼容服务、Ollama 等本地 AI 端点。",
-        "NSMicrophoneUsageDescription": "PI-Desktop uses the microphone for Live voice calls and authorized plugin audio access. / PI-Desktop 使用麦克风进行实时语音通话，以及你已授权的插件音频访问。",
+        "NSLocalNetworkUsageDescription": "OMP Desktop needs local network access so agents can reach OpenAI-compatible providers, Ollama, and other AI endpoints running on your LAN. / OMP Desktop 需要本地网络访问权限，以便助手请求同一局域网中的 OpenAI 兼容服务、Ollama 等本地 AI 端点。",
+        "NSMicrophoneUsageDescription": "OMP Desktop uses the microphone for Live voice calls and authorized plugin audio access. / OMP Desktop 使用麦克风进行实时语音通话，以及你已授权的插件音频访问。",
         "NSBonjourServices": [
           "_http._tcp",
           "_https._tcp"
@@ -201,7 +209,7 @@
     },
     "win": {
       "executableName": "OMP-Desktop",
-      "artifactName": "OMP-Desktop-Portable-${version}.${ext}",
+      "artifactName": "OMP-Desktop-${version}-win-${arch}.${ext}",
       "target": [
         {
           "target": "nsis",
@@ -238,11 +246,11 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "shortcutName": "OMP Desktop",
-      "artifactName": "OMP-Desktop-Setup-${version}.${ext}",
+      "artifactName": "OMP-Desktop-Setup-${version}-${arch}.${ext}",
       "uninstallDisplayName": "OMP Desktop"
     },
     "portable": {
-      "artifactName": "OMP-Desktop-Portable-${version}.${ext}"
+      "artifactName": "OMP-Desktop-Portable-${version}-${arch}.${ext}"
     },
     "deb": {
       "packageName": "omp-desktop",
@@ -281,8 +289,8 @@
       ]
     },
     "asarUnpack": [
-      "node_modules/transcribe-cpp/**/*.node",
-      "node_modules/transcribe-cpp/**/bin/**",
+      "node_modules/@transcribe-cpp/**/*",
+      "node_modules/@koromix/koffi-*/**/*",
       "node_modules/@picovoice/pvrecorder-node/**/*.node",
       "node_modules/@picovoice/pvrecorder-node/**/lib/**"
     ],

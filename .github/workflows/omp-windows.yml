@@ -1,0 +1,94 @@
+name: OMP Windows (artifacts only)
+
+# This lane never runs on a push/tag and never creates a GitHub Release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omp-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Native Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Reads the exact pnpm 12 version/integrity from root packageManager.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          architecture: x64
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: omp-windows-x64
+
+      - name: Require native Windows x64 toolchains
+        run: |
+          node -e "if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('Native Windows x64 Node is required')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $rustHost = rustc -vV
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($rustHost -notcontains 'host: x86_64-pc-windows-msvc') {
+            throw 'Native Windows x64 MSVC Rust is required'
+          }
+
+      - name: Install native Windows dependencies
+        # Optional platform packages (koffi and transcribe-cpp) and node-pty
+        # must be installed here, never copied from a Linux node_modules tree.
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows x64 packages without publishing
+        # The desktop script builds the locked native Rust host and JS inputs,
+        # then stamps NSIS, ZIP and Portable distribution metadata separately.
+        run: pnpm --filter @pi-desktop/desktop run dist:win --x64
+
+      - name: Test release safety and native binary validation
+        run: node --test apps/desktop/test/windows-packaging.test.mjs
+
+      - name: Test isolated omp Windows binary discovery and protocol probes
+        run: |
+          pnpm --filter @pi-desktop/agent-runtime exec vitest run src/omp/binary.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm --filter @pi-desktop/agent-runtime exec vitest run src/omp/omp-p0.test.ts src/omp/omp.test.ts -t 'omp binary'
+
+      - name: Verify shipped native Windows binaries and start packaged host
+        # PE headers, unpacked native dependency presence, LICENSE/NOTICE,
+        # distinct output names and a real host handshake in a temporary profile.
+        # This does not use omp/provider credentials or test any voice feature.
+        run: node scripts/verify-windows-package.mjs
+
+      - name: Upload Windows build outputs only
+        uses: actions/upload-artifact@v7
+        with:
+          name: omp-desktop-windows-x64-${{ github.run_number }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          path: |
+            apps/desktop/release/OMP-Desktop-Setup-*-x64.exe
+            apps/desktop/release/OMP-Desktop-Portable-*-x64.exe
+            apps/desktop/release/OMP-Desktop-*-win-x64.zip
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
