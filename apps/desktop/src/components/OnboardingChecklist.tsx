@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../lib/api";
 import { useAppStore } from "../stores/app-store";
@@ -10,24 +11,63 @@ const STEP_LOCALE_KEY: Record<string, string> = {
   project: "openProject",
   prompt: "firstPrompt",
   plugin: "loadPlugin",
+  ompSetup: "ompSetup",
 };
 
-const OMP_HANDLED_STEPS = new Set(["provider", "secret", "prompt"]);
+const OMP_HANDLED_STEPS: Readonly<Record<string, true>> = {
+  provider: true,
+  secret: true,
+  prompt: true,
+};
 
 /** First-run inline checklist (D021): rendered on the empty chat home until
- * every step is done or the user dismisses it. State comes from the host
- * (app.getOnboarding); actions deep-link into the relevant surface. */
+ * every step is done or the user dismisses it. Optional steps come from the
+ * host; critical model availability comes from omp. Actions deep-link to setup. */
 export function OnboardingChecklist() {
   const { t } = useTranslation();
   const onboarding = useAppStore((s) => s.onboarding);
   const setPage = useAppStore((s) => s.setPage);
   const setSettingsTab = useAppStore((s) => s.setSettingsTab);
   const openProject = useAppStore((s) => s.openProject);
+  const page = useAppStore((s) => s.page);
+  const dismissed = useAppStore((s) => s.settings?.onboardingDismissed === true);
+  const [locallyDismissed, setLocallyDismissed] = useState(false);
+  const [availability, setAvailability] = useState<"loading" | "ready" | "missing" | "error">("loading");
 
-  if (!onboarding?.showChecklist) return null;
-  // omp owns models and logins, and the host never sees omp prompts, so the
-  // provider / API key / first-message steps would never complete here.
-  const steps = (onboarding.steps ?? []).filter((step) => !OMP_HANDLED_STEPS.has(step.id));
+  useEffect(() => {
+    if (page !== "chat" || dismissed || locallyDismissed) return;
+    let cancelled = false;
+    let generation = 0;
+    const refresh = () => {
+      const request = ++generation;
+      void api.ompListModels(true).then(
+        ({ models }) => {
+          if (!cancelled && request === generation) {
+            setAvailability(models.length > 0 ? "ready" : "missing");
+          }
+        },
+        () => {
+          if (!cancelled && request === generation) setAvailability("error");
+        },
+      );
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [page, dismissed, locallyDismissed]);
+
+  const needsOmpSetup = availability === "missing" || availability === "error";
+  if (!onboarding || dismissed || locallyDismissed || (!onboarding.showChecklist && !needsOmpSetup)) return null;
+  // Host providers and prompt counts do not describe omp's configured models.
+  // Keep optional host steps, but derive the critical setup step from omp.
+  const steps = (onboarding.showChecklist ? onboarding.steps : [])
+    .filter((step) => !OMP_HANDLED_STEPS[step.id]);
+  if (needsOmpSetup) {
+    steps.unshift({ id: "ompSetup", title: "", done: false, action: "omp.setup" });
+  }
   if (steps.length === 0 || steps.every((s) => s.done)) return null;
 
   const stepLabel = (id: string, fallback: string) => {
@@ -38,6 +78,10 @@ export function OnboardingChecklist() {
 
   const runAction = (id: string) => {
     switch (id) {
+      case "omp.setup":
+        setSettingsTab("accounts");
+        setPage("settings");
+        break;
       case "settings.providers":
       case "addProvider":
       case "saveKey":
@@ -70,9 +114,11 @@ export function OnboardingChecklist() {
       .dismissOnboarding()
       .catch(() => undefined)
       .finally(() => {
-        const current = useAppStore.getState().onboarding;
+        setLocallyDismissed(true);
+        const { onboarding: current, settings } = useAppStore.getState();
         if (current) {
           useAppStore.setState({
+            settings: settings ? { ...settings, onboardingDismissed: true } : undefined,
             onboarding: { ...current, showChecklist: false },
           });
         }
@@ -96,6 +142,11 @@ export function OnboardingChecklist() {
           {t("onboarding.dismiss")}
         </button>
       </div>
+      {needsOmpSetup && (
+        <p className="mb-2 text-sm text-text-muted" role="status">
+          {t(availability === "error" ? "onboarding.ompUnavailable" : "onboarding.ompSetupHint")}
+        </p>
+      )}
       <ul className="flex flex-col gap-1.5">
         {steps.map((step) => (
           <li key={step.id}>

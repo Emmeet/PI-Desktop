@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   GlobalPermissionMode,
@@ -15,7 +15,6 @@ import {
   ScheduledExecutionSettings,
   type ScheduledModelSelection,
 } from "./ScheduledExecutionSettings";
-import { useAppStore } from "../../stores/app-store";
 import "./scheduled-editor.css";
 
 export type ScheduledDraft = Pick<ScheduledTask, "title" | "prompt" | "cadence" | "schedule"> & {
@@ -43,7 +42,11 @@ export function ScheduledEditor({
   cancel: () => void;
 }) {
   const { t } = useTranslation();
-  const settings = useAppStore((state) => state.settings);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const titleHintId = useId();
+  useLayoutEffect(() => {
+    titleRef.current?.focus({ preventScroll: true });
+  }, []);
   const [title, setTitle] = useState(task?.title ?? "");
   const [prompt, setPrompt] = useState(task?.prompt ?? "");
   const [cadence, setCadence] = useState<ScheduledTask["cadence"]>(task?.cadence ?? "manual");
@@ -187,13 +190,21 @@ export function ScheduledEditor({
       </h2>
       <Field label={t("nav.newTask")}>
         <Input
+          ref={titleRef}
+          aria-label={t("nav.newTask")}
+          aria-invalid={!title.trim() || undefined}
+          aria-describedby={!title.trim() ? titleHintId : undefined}
           required
-          autoFocus
           value={title}
           maxLength={80}
           onChange={(e) => setTitle(e.target.value)}
         />
       </Field>
+      {!title.trim() && (
+        <p id={titleHintId} className="dest-row-meta" role="status">
+          {t("scheduled.nameRequired")}
+        </p>
+      )}
       <Field label={t("scheduled.prompt")}>
         <div className="composer-shell scheduled-instruction-shell">
           <Textarea

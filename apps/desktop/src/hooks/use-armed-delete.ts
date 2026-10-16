@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /** How long an armed delete stays armed before it disarms itself. */
-export const ARMED_DELETE_MS = 3200;
+export const ARMED_DELETE_MS = 5000;
 
 /**
  * A delete that needs two clicks. The first click arms the action and the

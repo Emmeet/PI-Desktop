@@ -252,6 +252,9 @@
 }
 
 .settings-nav-item {
+  /* Native hit testing must exclude each control, not just its scroll host. */
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
   display: flex;
   width: 100%;
   align-items: center;
