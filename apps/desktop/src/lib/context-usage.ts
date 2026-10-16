@@ -109,6 +109,19 @@ export function resolveContextWindow(
   return providerWindow ?? DEFAULT_CONTEXT_WINDOW;
 }
 
+/** omp's selected provider/model metadata is authoritative over host defaults. */
+export function resolveOmpContextWindow(
+  providerId: string | undefined,
+  modelId: string | undefined,
+  windows: Readonly<Record<string, number>>,
+  reportedWindow?: number,
+): number {
+  const metadata = providerId && modelId
+    ? positiveTokenCount(windows[`${providerId}/${modelId}`])
+    : 0;
+  return metadata || positiveTokenCount(reportedWindow) || DEFAULT_CONTEXT_WINDOW;
+}
+
 export type ContextUsage = {
   usedTokens: number;
   remainingTokens: number;
@@ -140,11 +153,11 @@ export function calculateContextUsage(
 
 /**
  * Which figure the composer ring and its summary lead with (D398). Absent or
- * unrecognised values keep the remaining-capacity default, so a persisted
- * typo never blanks the trigger.
+ * unrecognised values use consumed capacity; explicitly selected remaining
+ * capacity keeps its countdown behavior.
  */
 export function resolveContextUsageDisplay(value: unknown): ContextUsageDisplay {
-  return value === "used" ? "used" : "remaining";
+  return value === "remaining" ? "remaining" : "used";
 }
 
 export type ContextUsageView = {

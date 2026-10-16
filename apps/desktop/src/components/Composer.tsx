@@ -24,6 +24,7 @@ import {
 } from "@pi-desktop/shared";
 import { useAppStore } from "../stores/app-store";
 import { latestTurnContextInspector } from "../lib/latest-turn-context";
+import { resolveOmpContextWindow } from "../lib/context-usage";
 import { isActivePlanExecution } from "../lib/plan-mode-state";
 import { headAsk, queuedAskCount } from "../lib/pending-asks";
 import type { QueuedPrompt } from "../lib/queued-prompts";
@@ -422,14 +423,18 @@ export function Composer({
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [ompEngine]);
-  const ompModelKey = activeSessionSummary?.providerId && activeSessionSummary?.modelId
-    ? `${activeSessionSummary.providerId}/${activeSessionSummary.modelId}`
-    : undefined;
+  const ompProviderId = activeSessionSummary?.providerId;
+  const ompModelId = activeSessionSummary?.modelId;
   const ompContextUsage = useMemo(() => {
     if (!ompEngine || !composerContextUsage) return composerContextUsage;
-    const window = (ompModelKey && ompWindows[ompModelKey]) || composerContextUsage.contextWindow;
-    return window ? { ...composerContextUsage, contextWindow: window } : undefined;
-  }, [ompEngine, composerContextUsage, ompModelKey, ompWindows]);
+    const contextWindow = resolveOmpContextWindow(
+      ompProviderId,
+      ompModelId,
+      ompWindows,
+      composerContextUsage.contextWindow,
+    );
+    return { ...composerContextUsage, contextWindow };
+  }, [ompEngine, composerContextUsage, ompProviderId, ompModelId, ompWindows]);
   const modelReady = nativeSession
     ? activeSessionSummary.capabilities?.canPrompt === true
     : !activeSessionSummary

@@ -11,6 +11,7 @@ import {
   estimateToolTokenUsage,
   resolveContextUsageDisplay,
   resolveContextWindow,
+  resolveOmpContextWindow,
   toolTokenUsage,
   usageTokenTotal,
   settleStoppedAssistantMetrics,
@@ -50,12 +51,43 @@ test("context usage display preference picks the ring's leading figure", () => {
   assert.equal(used.ratio, 100 / 128);
 });
 
-test("an absent or unrecognised display value keeps the remaining default", () => {
-  assert.equal(resolveContextUsageDisplay(undefined), "remaining");
+test("an absent or unrecognised display value defaults to used capacity", () => {
+  assert.equal(resolveContextUsageDisplay(undefined), "used");
   assert.equal(resolveContextUsageDisplay("used"), "used");
   assert.equal(resolveContextUsageDisplay("remaining"), "remaining");
-  assert.equal(resolveContextUsageDisplay("bogus"), "remaining");
-  assert.equal(resolveContextUsageDisplay(null), "remaining");
+  assert.equal(resolveContextUsageDisplay("bogus"), "used");
+  assert.equal(resolveContextUsageDisplay(null), "used");
+});
+
+test("the default ring increases with consumption and clamps at the model limit", () => {
+  const display = resolveContextUsageDisplay(undefined);
+  let previous = -1;
+  for (const tokens of [0, 1, 50, 99, 100, 150]) {
+    const context = calculateContextUsage({ inputTokens: tokens, outputTokens: 0 }, 100);
+    const view = contextUsageView(context, display);
+    assert.ok(view.ratio >= previous);
+    assert.equal(view.ratio, Math.min(1, tokens / 100));
+    assert.equal(contextUsageView(context, "remaining").ratio, 1 - view.ratio);
+    previous = view.ratio;
+  }
+});
+
+test("omp context uses exact selected-model metadata before reported or default windows", () => {
+  const windows = {
+    "stepfun/step-5-preview": 262_144,
+    "other/step-5-preview": 32_000,
+    "stepfun/invalid": Number.NaN,
+    "stepfun/negative": -1,
+    "stepfun/infinite": Number.POSITIVE_INFINITY,
+  };
+  assert.equal(resolveOmpContextWindow("stepfun", "step-5-preview", windows, 128_000), 262_144);
+  assert.equal(resolveOmpContextWindow("other", "step-5-preview", windows), 32_000);
+  for (const model of ["unknown", "invalid", "negative", "infinite"]) {
+    assert.equal(resolveOmpContextWindow("stepfun", model, windows, 200_000), 200_000);
+    assert.equal(resolveOmpContextWindow("stepfun", model, windows, 0), 128_000);
+  }
+  assert.equal(resolveOmpContextWindow(undefined, "step-5-preview", windows), 128_000);
+  assert.equal(resolveOmpContextWindow("stepfun", undefined, windows, Number.NaN), 128_000);
 });
 
 test("context window prefers the selected model catalog over provider fallback", () => {

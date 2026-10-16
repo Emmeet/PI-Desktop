@@ -22,17 +22,17 @@ window, which provides little signal at a glance.
 
 1. A new setting `AppSettings.contextUsageDisplay` (`ContextUsageDisplay =
    "remaining" | "used"`) lets the user choose which figure the context
-   inspector leads with. The default (and fallback for absent or
-   unrecognised values) is `"remaining"`, preserving the existing behaviour.
+   inspector leads with. In OMP Desktop, the default (and fallback for absent or
+   unrecognised values) is `"used"`; an explicitly saved `"remaining"` is preserved.
 2. When `contextUsageDisplay` is `"used"`, the composer toolbar ring's
    arc length (`strokeDashoffset`), the trigger percentage and token label,
    the popover heading, the tooltip, and the `aria-label` all switch to
    the used-capacity pair instead of the remaining pair. The ring fills
    proportionally to `usedRatio` rather than `remainingRatio`.
 3. Warning and critical color thresholds remain based on **remaining**
-   capacity (remaining ≤ 25 % → warning, ≤ 10 % → critical) regardless
-   of the display mode. A display reading "used 78 %" still turns warning
-   colour because only 22 % remains.
+   capacity (remaining ≤ 20 % → warning, ≤ 5 % → critical) regardless
+   of the display mode. A display reading "used 82 %" still turns warning
+   colour because only 18 % remains.
 4. Settings → AI → Defaults gains a `ContextUsageDisplayRow` (segmented
    control: Remaining / Used) placed after the Link open destination row
    and before the Enter-to-send row.
@@ -44,8 +44,8 @@ window, which provides little signal at a glance.
 ## Consequences
 
 - Users who prefer a "how much have I spent" mental model get a consistent
-  display; users who prefer the original "how much is left" model see no
-  change by default.
+  default display; users who explicitly select "how much is left" retain
+  that preference across upgrades.
 - The ring arc direction flips visually when switching to `"used"`, which
   is the correct correspondence: a fuller ring means more context consumed.
 - Color semantics stay stable across modes, so the warning/critical signal
