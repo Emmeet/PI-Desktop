@@ -28,19 +28,25 @@
   （`parseAllowedExternalUrl`，D330 / ADR 0168）。`file:`、`javascript:`、
   `data:` 和自定义 URI scheme 不会到达 `shell.openExternal`。
   `will-navigate` 阻止所有非开发服务器导航
-- 预加载仅公开经过白名单检查的 ADR/../03-runtime/09-logging-and-observability.md 桥
-  （`IPC_WHITELIST` 在 preload 和主侧均强制执行）
+- preload 分别维护 invoke 通道和事件订阅允许列表，不导出 Electron API 或 Node 原语。
+  Main 在任何外部 IPC handler/router 运行前校验已注册聊天窗口所有权、原始主框架和精确原始 URL。
+  拒绝未知窗口、子框架与已导航框架。插件启动器仅有设置读取、插件列表/打开和关闭启动器；
+  小组件仅有设置读取及原有两项小组件操作，不获得聊天 IPC 能力。
 
 ### 内容安全政策
 
-- 开发者：`script-src 'self' 'unsafe-inline' 'unsafe-eval'`（Vite要求
-  HMR 工具），本地主机 websocket connect-src。字体仅限于
-  `'self'` 和 `data:`，因此 Vite 内联的 KaTeX WOFF2 资源无需渲染即可渲染
-承认远程字体来源。
-- 生产版本：`'unsafe-eval'` 和 localhost connect-src 被剥离
-  在构建时（`electron.vite.config.ts` 中的 `tightenCsp` 插件）；
-  仅限 `connect-src 'self'`。提供商网络流量发生在 Node 中
-  sidecar，从未在渲染器中。
+- 生产 `script-src` 仅允许 `'self'`、权限门控的 `plugin-renderer:` 模块，以及构建生成的
+  不可变 import map 的精确 SHA-256 哈希。静态 `renderer-host/{react,reactDom,reactDomClient}.js`
+  shim 共享 React，无需运行时 blob 模块或通用内联/eval 脚本权限。
+- 生产 `connect-src` 仅为 `'self' plugin-renderer:`；开发只增加实际 Vite HTTP/WebSocket
+  来源。React Refresh 内联前导只在开发时启用，不允许任意 localhost 端口通配。
+  字体仍仅允许 `'self'`、`data:` 和获准的本地插件资源。
+- `object-src`、`base-uri`、`frame-src`、`form-action` 均为 `'none'`。
+  提供商网络请求由 OMP/Node 运行时发出，不由渲染器执行。
+- `renderer.extension` 在显式权限审核后仍是可信的进程内渲染器代码；CSP 不会使其成为不可信的
+  沙箱访客，只应安装可信扩展。其他插件面板保留原有 bridge 所有权/权限边界。
+- `OMP_DESKTOP_NO_SANDBOX` 仅是源码开发启动器的显式选项；启动器拒绝生产/已安装场景，
+  打包主进程绝不读取此变量。它不是 Windows 安装绕过方式，也不是生产启动建议。
 - 助理美人鱼图不会扩大 CSP 或渲染器权限。只有一个
   完成的答案栅栏可以动态加载捆绑的本地渲染器。
   美人鱼与 `securityLevel: strict` 一起运行，受保护的 security/theme/limit

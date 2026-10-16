@@ -10,7 +10,7 @@ import { useEffect, useLayoutEffect } from "react";
 import { sessionAwaitsDecision, useHostSafetySurfaceMounted } from "../../lib/host-safety-layer";
 import { useAppStore } from "../../stores/app-store";
 import { pluginLayers } from "../renderer-layers/layer-stack";
-import { installRendererImportMap } from "./import-map";
+import { publishRendererHostModules } from "./import-map";
 import { rendererLoadSpecs, rendererModules } from "./loader";
 import "../renderer-slots/slot-shell.css";
 
@@ -22,8 +22,8 @@ export function PluginRendererHost(): null {
   const suspended = awaitsDecision || safetySurfaceMounted;
 
   useEffect(() => {
-    // Plugin modules import bare `react`: the map must exist before the first.
-    installRendererImportMap();
+    // The document's static import map points at these live host namespaces.
+    publishRendererHostModules();
     rendererModules.sync(rendererLoadSpecs(plugins, projectPath));
   }, [plugins, projectPath]);
 

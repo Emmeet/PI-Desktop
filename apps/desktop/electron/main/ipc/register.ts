@@ -44,6 +44,7 @@ import type { IpcRegistrar } from "./types";
 import type { createTraySessions } from "../tray-sessions";
 import type { createTaskbarUnreadBadge } from "../taskbar-unread-badge";
 import { chatWindows, createChatWindow } from "../chat-windows";
+import { assertRendererSender } from "../renderer-sender";
 
 export type RegisterIpcDependencies = {
   isQuitting: () => boolean;
@@ -190,8 +191,9 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     // session is owned by a paired remote host is served over RACP-WS; every
     // other call (and every internal invoke, which never reaches this wrapper)
     // runs the existing local handler byte-for-byte unchanged.
-    ipcMain.handle(channel, async (_event, ...args) =>
+    ipcMain.handle(channel, async (event, ...args) =>
       wrap(async () => {
+        assertRendererSender(event, channel, { launcher: getPluginLauncherWindow(), ownsWidget: (id) => liveVoiceWidget?.owns(id) === true });
         const router = getBackendRouter?.();
         if (router) {
           const outcome = await router.route(channel, args);
@@ -206,7 +208,10 @@ export function registerIpcHandlers(dependencies: RegisterIpcDependencies) {
     fn: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<any>,
   ) => {
     ipcMain.handle(channel, async (event, ...args) =>
-      wrap(() => fn(event, ...args)),
+      wrap(async () => {
+        assertRendererSender(event, channel, { launcher: getPluginLauncherWindow(), ownsWidget: (id) => liveVoiceWidget?.owns(id) === true });
+        return fn(event, ...args);
+      }),
     );
   };
   const assertMainWindowSender = (event: IpcMainInvokeEvent): void => {

@@ -30,8 +30,13 @@ Required (all **implemented**):
   the owning surface replaces the handler with its own policy, so a window
   that forgets to wire one denies popups instead of inheriting Chromium's
   defaults
-- Preload exposes a whitelist-checked `invoke`/`on` bridge only
-  (`IPC_WHITELIST` enforced on both preload and main sides)
+- Preload exposes separate allowlists for invoke channels and subscribed events;
+  neither the Electron API nor Node primitives are exported. Main validates
+  registered chat-window ownership, the original main frame and exact original
+  URL before any external IPC handler/router runs. Unknown windows, subframes
+  and navigated frames are denied. The plugin launcher gets only settings read,
+  plugin listing/open and launcher dismissal; widgets get settings read and their
+  two existing widget operations, not the chat IPC surface.
 - Transcript Markdown is sanitized (`rehype-sanitize`), but remote `http(s)`
   images, audio, and video that a model writes into a reply are fetched on
   render, without a click. This is a deliberate readability trade-off: a
@@ -40,14 +45,23 @@ Required (all **implemented**):
 
 ### Content Security Policy
 
-- Dev: `script-src 'self' 'unsafe-inline' 'unsafe-eval'` (required by Vite
-  HMR tooling), localhost websocket connect-src. Fonts are restricted to
-  `'self'` and `data:` so Vite-inlined KaTeX WOFF2 assets can render without
-  admitting remote font origins.
-- Production build: `'unsafe-eval'` and localhost connect-src are stripped
-  at build time (`tightenCsp` plugin in `electron.vite.config.ts`);
-  `connect-src 'self'` only. Provider network traffic happens in the Node
-  sidecar, never in the renderer.
+- Production `script-src` permits `'self'`, permission-gated `plugin-renderer:`
+  modules and the exact SHA-256 hash of the build-generated immutable import map.
+  Static `renderer-host/{react,reactDom,reactDomClient}.js` shims preserve shared
+  React without runtime blob modules or general inline/eval script permission.
+- Production `connect-src` is `'self' plugin-renderer:` only. Development adds
+  only the actual Vite HTTP/WebSocket origin; React Refresh's inline preamble is
+  development-only. No arbitrary localhost-port wildcard is admitted. Fonts stay
+  restricted to `'self'`, `data:` and permitted local plugin assets.
+- `object-src`, `base-uri`, `frame-src` and `form-action` are `'none'`.
+  Provider network traffic belongs to the OMP/Node runtime, not the renderer.
+- `renderer.extension` remains trusted in-process renderer code after explicit
+  permission review. CSP does not make such extensions untrusted sandbox guests;
+  install only trusted extensions. Other plugin panels keep their existing bridge
+  ownership/permission boundaries.
+- `OMP_DESKTOP_NO_SANDBOX` is a source-development launcher opt-in only; the launcher
+  rejects production/installed use and packaged main never reads it. It is not a
+  Windows installation workaround or production launch recommendation.
 - Assistant Mermaid diagrams do not widen CSP or renderer privileges. Only a
   completed answer fence may dynamically load the bundled local renderer.
   Mermaid runs with `securityLevel: strict`, protected security/theme/limit

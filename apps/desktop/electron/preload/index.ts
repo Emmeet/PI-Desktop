@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { IPC, IPC_WHITELIST } from "@pi-desktop/shared/protocol";
+import { IPC } from "@pi-desktop/shared/protocol";
 
 const LOCALE_ARGUMENT_PREFIX = "--pi-desktop-locale=";
 
@@ -9,19 +9,26 @@ function readOsLocale(): string | undefined {
     ?.slice(LOCALE_ARGUMENT_PREFIX.length);
 }
 
-function assertChannel(channel: string) {
-  if (!IPC_WHITELIST.has(channel)) {
+const invokeChannels: Record<string, true> = Object.fromEntries(
+  Object.values(IPC.invoke).map((channel) => [channel, true as const]),
+);
+const eventChannels: Record<string, true> = Object.fromEntries(
+  Object.values(IPC.event).map((channel) => [channel, true as const]),
+);
+
+function assertChannel(channels: Record<string, true>, channel: string) {
+  if (!Object.hasOwn(channels, channel)) {
     throw new Error(`IPC channel not allowed: ${channel}`);
   }
 }
 
 const api = {
   invoke: async <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
-    assertChannel(channel);
+    assertChannel(invokeChannels, channel);
     return ipcRenderer.invoke(channel, ...args) as Promise<T>;
   },
   on: (channel: string, listener: (...args: unknown[]) => void) => {
-    assertChannel(channel);
+    assertChannel(eventChannels, channel);
     const wrapped = (_event: Electron.IpcRendererEvent, ...args: unknown[]) =>
       listener(...args);
     ipcRenderer.on(channel, wrapped);

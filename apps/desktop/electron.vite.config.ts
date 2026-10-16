@@ -1,21 +1,47 @@
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { defineConfig } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import type { Plugin } from "vite";
+import { rendererHostModuleSources, rendererImportMapSource } from "./src/plugins/renderer-host/import-map";
 
-// Dev needs 'unsafe-eval' for vite HMR tooling; production must not ship it.
-function tightenCsp(): Plugin {
+// Static shared-React modules let production reject inline/eval/blob scripts.
+function rendererSecurity(): Plugin {
+  const map = rendererImportMapSource();
+  const hash = createHash("sha256").update(map).digest("base64");
+  const sources = rendererHostModuleSources();
   return {
-    name: "pi-tighten-csp",
-    apply: "build",
-    transformIndexHtml(html) {
-      return html
-        .replace(" 'unsafe-eval'", "")
-        .replace(
-          /connect-src [^;]*;/,
-          "connect-src 'self';",
-        );
+    name: "omp-renderer-security",
+    configureServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const path = request.url?.split("?")[0]?.replace(/^\//, "");
+        if (!path || !Object.hasOwn(sources, path)) return next();
+        response.setHeader("Content-Type", "text/javascript; charset=utf-8");
+        response.end(sources[path]);
+      });
+    },
+    generateBundle() {
+      for (const [fileName, source] of Object.entries(sources)) {
+        this.emitFile({ type: "asset", fileName, source });
+      }
+    },
+    transformIndexHtml: {
+      order: "post",
+      handler(html, context) {
+        // React Refresh injects a preamble only in development. Production has
+        // one allowed inline script: this exact immutable import map.
+        const devUrl = context.server?.resolvedUrls?.local[0];
+        let result = html.replace("script-src 'self' plugin-renderer:;",
+          `script-src 'self' plugin-renderer: ${devUrl ? "'unsafe-inline'" : `'sha256-${hash}'`};`);
+        if (devUrl) {
+          const origin = new URL(devUrl).origin;
+          const websocket = origin.replace(/^http/, "ws");
+          result = result.replace("connect-src 'self' plugin-renderer:;",
+            `connect-src 'self' plugin-renderer: ${origin} ${websocket};`);
+        }
+        return result.replace("</head>", `<script type="importmap">${map}</script></head>`);
+      },
     },
   };
 }
@@ -112,7 +138,7 @@ export default defineConfig({
         },
       },
     },
-    plugins: [react(), tailwindcss(), tightenCsp(), dropLegacyFontFallbacks()],
+    plugins: [react(), tailwindcss(), rendererSecurity(), dropLegacyFontFallbacks()],
     resolve: {
       alias: [
         { find: "@renderer", replacement: resolve("src") },
