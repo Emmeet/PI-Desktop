@@ -63,6 +63,11 @@ jobs:
         # must be installed here, never copied from a Linux node_modules tree.
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace dependencies
+        # cmd.exe (used by pnpm scripts on Windows) does not honor the single
+        # quotes in `build:deps`, so the ^... filter silently matched nothing.
+        run: pnpm --filter '@pi-desktop/desktop^...' --fail-if-no-match build
+
       - name: Build Windows x64 packages without publishing
         # The desktop script builds the locked native Rust host and JS inputs,
         # then stamps NSIS, ZIP and Portable distribution metadata separately.
