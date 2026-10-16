@@ -5357,3 +5357,29 @@ Markdown 源码，不是 `text/html` 负载；对禁用行内 HTML 的外部编�
 - 由 `apps/desktop/test/session-title-prompt-fallback.test.mjs`、
   `apps/desktop/test/queue-pending-actions.test.mjs`、host-core 的 `derive_session_title`
   单测与 E2E-021a 覆盖。见 ADR 0323。
+
+## 2026-10-16 —— OMP Desktop 就绪度修复（未发布 fork）
+
+- 在 README/NOTICE 和安装包资源中保留 vastsa/PI-Desktop v0.18.0、LGPL-3.0 来源，
+  并提供精确修订对应的公开 fork 源码。
+- 隔离正式/开发版 OMP 锁和数据根；首次受管理启动可只读复制并校验上游。
+  不覆盖已有 OMP profile，不修改上游数据库/WAL，不把上游源作为可删除备份。
+- 桌面独立保存 `always-ask` / `write` / `yolo`，默认为 `write`，逐进程 CLI 覆盖，
+  不改变全局 OMP 模式；按工具的共享规则语义保持不变。
+- 要求稳定版 OMP `>=18.10.0 <19.0.0` 与 RPC 协议 1；崩溃后按 250 ms/1 s/4 s
+  有限重连，恢复同一会话并保留队列，绝不重放不确定的活动工作；耗尽后“继续”可重试。
+- 上下文环/详情/aria 默认已用容量，保留显式剩余偏好；精确模型元数据优先于报告窗口，
+  仍按剩余容量 20%/5% 判断警告/临界状态。
+- 新建任务明确聚焦名称并给出可访问必填指引；删除武装延长至五秒；新手引导从 OMP 模型
+  判断提供商就绪。设置控件明确禁止拖拽；坐标回归不宣称已证明旧 32px 根因。
+- CSP 仅允许本地插件模块及精确哈希静态 import map，开发连接仅实际 Vite 来源。
+  主框架/窗口 IPC 所有权与 preload invoke/事件独立允许列表收敛跨界面访问。
+  进程内渲染器扩展仍是可信代码，不是沙箱访客。
+- 增加仅派发的原生 Windows x64 NSIS/ZIP/Portable 构建及 schema/原生清单/host 握手检查，
+  产物命名区分，拒绝跨平台/架构打包且不发布。GitHub 注册、真实 Windows 投递、未签名警告
+  均保留明确验证边界；自动更新仍须显式开启。
+- 六种语言 de/es/fr/ko/pt-BR/tr 替换 657 项已有英文非语音缺失文案，九种语言均补齐
+  安装/兼容/恢复、新手引导和任务名称提示；保留技术名、变量与真正同形词。
+- 修复 OMP ADR 元数据/索引及中文运行时/偏好/场景镜像；E2E 区分 fixture 与真实 StepFun
+  角色归属、实体截图/全局快捷键权限及付费续跑。此次不包含语音、稳定发布/版本升级或上游 PR。
+

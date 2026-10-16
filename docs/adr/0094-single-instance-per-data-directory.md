@@ -105,3 +105,19 @@ Chromium `sessionData` may follow the copied browser profile. No silent relocati
 or reset of existing renderer state is introduced. The original rejection of
 implicitly relocating `userData` for locking remains valid. See
 [Custom storage location](custom-storage-location.md).
+
+## OMP Desktop isolation amendment (2026-10-16)
+
+The fork uses `OMP-Desktop` / `OMP-Desktop Dev` as Electron installation identities
+before requesting the lock, with `~/.omp-desktop` / `~/.omp-desktop-dev` host roots.
+The `io.github.emmeet.omp-desktop` application id remains distinct from upstream.
+Explicit `--user-data-dir` still wins. The index basename stays `pi.sqlite` but no
+default profile, lock or writable data tree is shared with PI-Desktop.
+
+The first managed launch may import a closed upstream installation into a verified
+private copy; it does not migrate the original in place. Existing OMP data or
+preferences and explicit profile/data-root overrides opt out. The upstream source
+remains intact for manual recovery and is never a deletable OMP backup. See the
+[storage specification](../spec/03-runtime/04-data-storage.md#omp-first-start-import)
+and [storage ADR](custom-storage-location.md#omp-desktop-first-start-import-2026-10-16).
+

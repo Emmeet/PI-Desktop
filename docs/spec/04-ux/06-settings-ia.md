@@ -257,7 +257,7 @@ Settings is a **full-window page** that replaces the app sidebar + main chrome (
   keep their existing destinations. Context
   usage display controls whether the composer toolbar context ring and its
   popover lead with the remaining or the used capacity figure; the default
-  is remaining. The threshold controls when a text-only paste becomes a
+  is used, while an explicitly saved remaining preference is preserved. The threshold controls when a text-only paste becomes a
   temporary session-scratch file; it defaults to 600 characters and accepts
   integer values from 1 through 1,000,000.
 - Composer text actions are contributed by explicitly installed plugins and
@@ -1017,3 +1017,14 @@ settings primitives and all nine shipped catalogs, including Simplified Chinese.
   focus-chat key defaults to Alt+Shift+O. OMP reasoning/model/retry/interrupt keys
   are editable in Shortcuts and use OMP defaults without overriding active IME,
   menus, dialogs, already-consumed keys or repeated keydown events.
+
+### Desktop-only approval mode
+
+`AppSettings.ompApprovalMode` persists in the desktop host settings and defaults
+to `write` when absent or invalid, even if the user's global omp configuration
+uses `yolo`. Settings offers `always-ask`, `write` and `yolo`. The selected mode
+applies through a per-process OMP CLI override on every desktop-created process,
+including reconnect and utility processes. Active turns keep their starting mode;
+idle/new turns pick up the latest value. Changing this setting never reads or
+writes the global `tools.approvalMode`. Per-tool OMP approval rules remain shared,
+including the existing allow/prompt/deny precedence and Allow always action.

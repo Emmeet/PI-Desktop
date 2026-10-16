@@ -59,3 +59,42 @@ their bytes; extension authors own their portability. Backup deletion warns user
 to check these references. Ordinary external project directories are never moved.
 No schema/protocol version bump or plugin SDK change is required; storage IPC is
 additive, main-window-only, and preferences stay machine-local.
+
+## OMP Desktop first-start import (2026-10-16)
+
+First-start import is a separate fork cutover, not an in-place upstream relocation.
+Before application writers start, an OMP-owned import journal claims the isolated
+destination, copies the matching upstream host and Electron profile read-only,
+and verifies source inventories and hashes before and after copying. A legacy
+custom storage pointer is honored; pending upstream maintenance, unavailable
+volumes or concurrent source writes prevent publication. Close PI-Desktop first.
+
+Rust opens and relocates/checkpoints only the copied SQLite database, including
+its copied WAL state. The original database and WAL/SHM are never opened for writes
+or checkpointed. The atomic OMP pointer activates the verified `data/` and
+`browser/` copy; failures retain journal ownership for a same-destination retry
+and refuse a partial startup. Existing OMP data/preferences and explicit root or
+profile overrides prevent automatic import. Upstream source trees remain manual
+recovery copies and are not offered by OMP backup cleanup.
+
+Cross-install import rejects all retained data/browser symlinks (transient Chromium
+locks are excluded), rather than inheriting ordinary relocation's external-link
+preservation. Canonical OMP anchor/default-root disjointness from upstream
+default/custom roots is validated before journal/directory/preference writes;
+an existing OMP pointer is never allowed to activate an upstream root.
+
+Rust's first-start-only `--import-data <source> <copy>` reuses relocation, rejects
+copied symlinks, and removes only the copied `secret:installation:oauth-device-id`.
+The existing identity creator generates a fresh OMP device id on next OAuth use;
+machine key, provider credentials and upstream bytes remain unchanged. Ordinary
+settings moves keep `--relocate-data` and their existing installation-local
+identity and link-preservation policy.
+
+An established private OMP installation must not depend on the continuing validity
+of upstream preferences. Completed-import disjointness uses original source roots
+recorded in OMP's journal, retaining custom-source alias protection even if upstream
+configuration breaks. Existing private profiles without a journal tolerate a legacy
+preference-read failure with a generic content-free warning. First-start import
+still requires valid upstream preferences, and errors in current OMP preferences
+or its ownership journal remain fatal.
+

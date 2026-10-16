@@ -245,3 +245,15 @@ relevant decision record before changing the contract.
 > D623 / ADR 0064 amends the inline automatic compaction trigger to 90% of
 > the derived hard budget. The hard limit remains the final provider-request
 > guard; no background compaction or storage/protocol change is introduced.
+
+## OMP Desktop fork cutover
+
+[OMP native sessions](../adr/omp-native-sessions.md) supersedes the embedded-Pi
+agent-engine clauses for this fork. Rust retains host-owned settings/projects and
+SQLite; OMP owns agent execution, its native session files, models and credentials.
+Desktop storage/lock identity is isolated as `OMP-Desktop{ Dev}` and
+`~/.omp-desktop{,-dev}` with verified read-only first-start upstream import.
+Desktop approval mode defaults to `write` through per-process CLI arguments,
+without changing the user's global OMP mode. No voice integration or release is
+implied by this cutover. See the OMP runtime, storage, security and delivery amendments.
+

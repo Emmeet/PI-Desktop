@@ -118,14 +118,16 @@ review snapshots, plugin code/data, models, configuration, or logs. Partial clea
 failure remains observable, retains active roots, and can be retried.
 
 
-A packaged installation keeps this tree in `~/.pi-desktop`. A development build
-keeps the same tree in `~/.pi-desktop-dev`, because a shipped app and a
-`pnpm dev` host are two installations that have to run at the same time (D599,
-ADR 0094). `PI_DESKTOP_DATA_DIR` replaces either root outright and is resolved
+An OMP Desktop packaged installation keeps this tree in `~/.omp-desktop`; development
+uses `~/.omp-desktop-dev`. Its Electron installation identity is `OMP-Desktop` or
+`OMP-Desktop Dev` under the OS application-data root, selected before locking.
+The upstream PI-Desktop identities and `~/.pi-desktop{,-dev}` roots are separate.
+The index basename remains `pi.sqlite` inside the isolated OMP root (ADR 0094).
+`PI_DESKTOP_DATA_DIR` replaces either root outright and is resolved
 to an absolute path before it reaches host-core as a child-process variable.
 
 ```text
-~/.pi-desktop/
+~/.omp-desktop/
  ├── pi.sqlite            # index database (WAL: + -wal/-shm) — host-core only
  ├── pi.sqlite.v6.bak     # archived pre-v7 database (D119 breaking reset)
  ├── pi.sqlite.v8.bak     # exact readable backup before v8→v15 destructive work
@@ -152,6 +154,60 @@ to an absolute path before it reaches host-core as a child-process variable.
                           # with the session; startup sweep removes orphans
                           # and stale dirs
 ```
+
+### OMP first-start import
+
+On the first managed start without existing OMP storage preferences or nonempty
+OMP data, detect the matching upstream `~/.pi-desktop{,-dev}` host root and
+`PI-Desktop{ Dev}` Electron profile. Close upstream PI-Desktop before starting
+this import. Honor upstream `storage-location.json` custom roots; pending upstream
+maintenance or an unavailable custom volume blocks import rather than creating
+an empty replacement profile. Explicit `PI_DESKTOP_DATA_DIR` or `--user-data-dir`
+opts out of automatic import; an existing OMP profile is never overwritten.
+
+Import copies and SHA-256 verifies the complete host and durable browser/plugin
+trees, including the database, WAL/SHM, transcripts, attachments and secret files
+with their permissions. Source inventory/hash stability is checked before and
+after copying. Rust opens, checks, relocates and checkpoints only the private
+copied database; it never opens or writes the upstream database. Concurrent source
+changes fail the import instead of publishing an inconsistent snapshot.
+
+Unlike a same-installation settings move, cross-install import rejects every
+retained data/browser symlink, except excluded transient Chromium lock files.
+Canonical disjointness of the OMP anchor/default root and upstream default/custom
+roots is checked before any OMP journal, directory or preference is written;
+existing OMP pointers cannot activate upstream roots. First-start Rust uses
+`--import-data <source> <copy>`, reusing relocation but rejecting copied symlinks
+and clearing only the copied `secret:installation:oauth-device-id`. Existing
+`createInstallationIdentity` generates a new OMP device id on the next OAuth use.
+The machine key, provider credentials and source bytes stay unchanged. Ordinary
+same-installation moves retain `--relocate-data`, link-preservation policy and
+their existing installation-local identity.
+
+The OMP-owned `omp-first-start-import.json` journal permits retries only in its
+claimed destination and refuses partial startup. After validation, atomic OMP
+storage-pointer publication activates `~/.omp-desktop/data` and `browser/` (or
+the development equivalent). Fresh starts without an import use the direct OMP
+root. Keep the upstream installation and its source directories as manual recovery
+copies: they are not registered as deletable OMP backups. Subsequent OMP launches
+do not re-import or overwrite local changes.
+
+Established private OMP profiles must remain startable if upstream preferences
+later become malformed, unsupported or unreadable. Completed imports validate
+against original source roots recorded in the OMP-owned journal, not current
+upstream configuration, so original custom-root aliases remain rejected. Existing
+private profiles without an import journal tolerate upstream preference-read
+failure with a generic content-free warning. First-start import remains strict
+about upstream preferences; invalid current OMP preferences or journals stay fatal.
+
+An initial clean start with no upstream source records its normal storage
+decision, so a later PI-Desktop installation does not trigger a surprise import.
+An OMP-root symlink is rejected during import decision to prevent aliasing upstream.
+Missing source on retry blocks startup instead of replacing a partial copy with
+empty data. The standalone host fallback and ignore defaults use the same OMP
+roots; the OAuth sign-in marker follows the resolved desktop data directory,
+including selected/custom roots, without hardcoded upstream writes.
+
 
 One database file keeps cross-entity writes transactional (e.g. session +
 turn + artifact in one commit). The DB stores **no large payloads**: message

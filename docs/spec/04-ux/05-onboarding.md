@@ -58,3 +58,15 @@ Example:
 1. Fresh profile shows checklist
 2. Completing provider+key+prompt removes critical empty-state blocker
 3. User can dismiss optional parts without breaking app use
+
+## OMP Desktop provider setup
+
+OMP availability is authoritative: query its available models instead of the
+host's intentionally empty embedded-provider tables. If no model is available,
+show a localized provider/sign-in step even when project/plugin steps are complete.
+It opens Accounts & subscriptions and explains that providers may also be configured
+in omp. A failed model query shows distinct installation/provider guidance, not a
+false "no providers" state. Refresh on returning to chat and on window focus.
+Persisted checklist dismissal remains respected. No provider secrets are read by
+the renderer, and no forced wizard or automatic paid request is introduced.
+

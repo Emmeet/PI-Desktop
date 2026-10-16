@@ -555,3 +555,22 @@ summary. It asks the user to check the certificate, clock, and trusted roots
 used by security software/proxies, then restart after changing trust. It does
 not claim that interception is the only possible cause or offer a TLS bypass.
 Manual Continue remains available after the cause is corrected.
+
+## OMP Desktop engine failures
+
+The renderer resolves these stable codes through `errors.<code>` in every shipped
+locale. Install/path and version/protocol guidance never includes provider secrets.
+
+| Code | Meaning and recovery |
+| --- | --- |
+| `OMP_NOT_FOUND` | Install `@oh-my-pi/pi-coding-agent@18` with Bun or set `PI_DESKTOP_OMP_BIN`. |
+| `OMP_VERSION_PROBE_FAILED` | Check the resolved executable/installation, then restart. |
+| `OMP_VERSION_UNSUPPORTED` | Install stable `>=18.10.0 <19.0.0`; unknown majors/prereleases are rejected. |
+| `OMP_PROTOCOL_UNSUPPORTED` | The RPC handshake is incompatible; use a supported OMP build with protocol version 1. |
+| `OMP_START_FAILED` | The child could not start; correct its installation/path before retrying. |
+| `OMP_PROCESS_EXITED` | The process ended unexpectedly; reconnect without replaying the active request. |
+| `OMP_DELIVERY_UNCERTAIN` | A message may already have reached OMP; inspect history before resending. |
+| `OMP_RECOVERY_FAILED` | Bounded reconnect failed; retain queued messages for explicit recovery. |
+| `OMP_RECONNECTING` | Nonterminal recovery notice with `attempt`, `maxAttempts` and `delayMs` interpolation parameters; queued messages remain retained. |
+| `OMP_RECONNECTED` | Recovery completed; queued messages were retained and the interrupted request was not replayed. |
+

@@ -509,3 +509,22 @@ transcript 保留稳定错误码、传输 errno 和原始 details，但使用本
 单个存储块无法回放属于另一种情况：网关丢弃 id 时本应用本身就会存下仅供展示的块，
 因此该消息的整条 replay 降级为“没有 replay”，而不是让之后每一轮请求都失败。
 回合继续执行，展示轮次不变；诊断只记录块数与阶段，不复制搜索内容、结果或凭据。
+
+## OMP Desktop 引擎错误
+
+渲染器通过每种已发布语言中的 `errors.<code>` 解析以下稳定错误码。
+安装/路径与版本/协议指引绝不包含提供商密钥。
+
+| 错误码 | 含义与恢复 |
+| --- | --- |
+| `OMP_NOT_FOUND` | 用 Bun 安装 `@oh-my-pi/pi-coding-agent@18`，或设置 `PI_DESKTOP_OMP_BIN`。 |
+| `OMP_VERSION_PROBE_FAILED` | 检查已解析的可执行文件/安装，然后重启。 |
+| `OMP_VERSION_UNSUPPORTED` | 安装稳定版 `>=18.10.0 <19.0.0`；拒绝未知主版本/预发布版。 |
+| `OMP_PROTOCOL_UNSUPPORTED` | RPC 握手不兼容；使用支持协议版本 1 的 OMP 构建。 |
+| `OMP_START_FAILED` | 子进程无法启动；修复安装/路径后重试。 |
+| `OMP_PROCESS_EXITED` | 进程意外结束；重连但不重放活动请求。 |
+| `OMP_DELIVERY_UNCERTAIN` | 消息可能已送达 OMP；先检查历史，再重新发送。 |
+| `OMP_RECOVERY_FAILED` | 有限次数重连失败；保留排队消息供显式恢复。 |
+| `OMP_RECONNECTING` | 非终态恢复通知，包含 `attempt`、`maxAttempts`、`delayMs` 插值参数；排队消息仍保留。 |
+| `OMP_RECONNECTED` | 恢复完成；排队消息已保留，中断请求未被重放。 |
+

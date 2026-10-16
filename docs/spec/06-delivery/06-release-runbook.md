@@ -650,3 +650,47 @@ Shell smoke on each native runner:
 - Rollback, staged rollout, and prerelease channel policy remain open release
   work. Existing unsigned macOS installs may need one manual signed DMG before
   in-app updates succeed.
+
+## OMP Desktop Windows artifact-only lane
+
+The fork's `.github/workflows/omp-windows.yml` is manually dispatched on a native
+`windows-latest` x64 MSVC runner. It reads the pinned workspace pnpm version,
+uses Node 24 x64 and stable x64 Rust, installs the frozen lockfile on Windows,
+and runs `pnpm --filter @pi-desktop/desktop run dist:win --x64`. It is not a
+push/tag trigger, release job, publisher or signing lane; repository permission
+is `contents: read`, with no provider credentials or signing secrets.
+
+`scripts/build-desktop-release.mjs` rejects a mismatched platform/architecture;
+Linux cross-packaging cannot qualify the Windows Rust host or native dependencies.
+Separate NSIS, ZIP and Portable passes produce these distinct names:
+
+- `OMP-Desktop-Setup-${version}-${arch}.exe`
+- `OMP-Desktop-${version}-win-${arch}.zip`
+- `OMP-Desktop-Portable-${version}-${arch}.exe`
+
+The lane executes `windows-packaging.test.mjs`, isolated OMP binary-discovery
+tests and `node scripts/verify-windows-package.mjs`. The verifier checks PE/native
+dependency presence and a real packaged-host handshake in a temporary profile,
+plus output naming and packaged `resources/LICENSE` / `resources/NOTICE`.
+Artifacts are uploaded as `omp-desktop-windows-x64-<run_number>` for 14 days;
+no GitHub Release or update feed is published. A successful configured workflow
+is not evidence of an actual Windows run: record the run URL and downloaded
+artifact hashes separately.
+
+GitHub requires `workflow_dispatch` registration on the repository's default
+branch. A branch-only workflow may not be dispatchable until it is registered;
+do not merge or release solely to bypass this prerequisite. Native local Windows
+builds use the same install/build/verification commands.
+
+After building, manually install/extract on Windows and verify launch, `omp.exe`
+and `omp.cmd` discovery, a model message, approved/denied tool use, existing
+`C:\Users\<user>\.omp` configuration access through omp, screenshot permission,
+and global hotkeys. Unsigned artifacts retain the SmartScreen unknown-publisher
+warning. Live provider authorization and physical Windows checks remain separate
+from credential-free CI, and voice qualification is outside this change.
+
+Automatic updates remain opt-in (`PI_DESKTOP_ENABLE_UPDATES=1`); the fork does not
+publish releases as part of this lane. Use manual source/package upgrades until
+a corresponding fork release is deliberately published. Preserve upstream
+LGPL-3.0 attribution and exact-revision public source per the root NOTICE.
+

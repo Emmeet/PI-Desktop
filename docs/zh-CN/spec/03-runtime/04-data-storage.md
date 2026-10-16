@@ -38,13 +38,13 @@
 
 ## 2. 文件布局
 
-正式打包版把上述目录树放在 `~/.pi-desktop`；开发构建放在 `~/.pi-desktop-dev`，
-因为正式版与 `pnpm dev` 是两个需要同时运行的安装（D599、ADR 0094）。
+OMP Desktop 正式打包版把上述目录树放在 `~/.omp-desktop`；开发构建放在 `~/.omp-desktop-dev`，
+两者的 Electron 身份为 `OMP-Desktop` / `OMP-Desktop Dev`，并与上游 PI-Desktop 隔离（ADR 0094）。
 `PI_DESKTOP_DATA_DIR` 会整体替换任一默认根目录，并在作为子进程环境变量传给
 host-core 之前被解析为绝对路径。
 
 ```text
-~/.pi-desktop/
+~/.omp-desktop/
  ├── pi.sqlite            # index database (WAL: + -wal/-shm) — host-core only
  ├── pi.sqlite.v6.bak     # archived pre-v7 database (D119 breaking reset)
  ├── pi.sqlite.v8.bak     # exact readable backup before v8→v15 destructive work
@@ -1396,3 +1396,41 @@ An unknown price is distinct from a known zero price; partial known costs remain
 on the individual operations. Late usage targets its captured turn and does not
 revive it or debit the currently active turn. Immediate nested parent and owning
 Task remain separate optional transcript/event fields.
+
+## OMP Desktop 隔离与首次导入
+
+OMP Desktop 正式版默认使用 `~/.omp-desktop`，开发版使用 `~/.omp-desktop-dev`，
+索引文件名仍为 `pi.sqlite`。Electron 在获取单实例锁之前选择系统应用数据目录中的
+`OMP-Desktop` 或 `OMP-Desktop Dev`，与上游 `PI-Desktop{ Dev}` 的锁、profile 和
+`~/.pi-desktop{,-dev}` 数据根目录隔离；显式 `--user-data-dir` 优先。
+
+首次受管理启动且没有 OMP 存储偏好或非空 OMP 数据时，检测相应上游 host/profile，
+并尊重其 `storage-location.json` 自定义根目录。导入前应退出上游 PI-Desktop。
+上游维护待决或自定义磁盘不可用时阻止导入，不创建空白替代数据。显式 `PI_DESKTOP_DATA_DIR`
+或 `--user-data-dir` 禁用自动导入；已有 OMP profile 和后续启动绝不覆盖本地数据。
+
+导入只读复制并以 SHA-256 验证完整 host 与持久浏览器/插件状态，包括数据库、WAL/SHM、
+转录、附件及保留权限的密钥文件。复制前后核对源清单与哈希稳定性；并发变化导致失败。
+Rust 只打开、检查、重定位和 checkpoint 私有数据库副本，绝不打开或写入上游数据库。
+
+跨安装导入与同一安装的设置迁移不同：拒绝 data/browser 树中所有保留符号链接，
+仅排除瞬态 Chromium 锁文件。写入任何 OMP 日志、目录或偏好前，先检查 OMP anchor/默认根
+与上游默认/自定义根的规范路径互不重叠；已有 OMP 指针也不能启用上游根。
+首次导入的 Rust 使用 `--import-data <source> <copy>`，复用重定位逻辑但拒绝副本符号链接，
+只清除副本中的 `secret:installation:oauth-device-id`；下一次 OAuth 使用时由既有
+`createInstallationIdentity` 生成独立 OMP 设备 ID。机器密钥、提供商凭据及源字节均不变。
+同一安装的普通迁移仍使用 `--relocate-data`、原有链接保留策略和安装本地身份。
+OMP 自有 `omp-first-start-import.json` 日志只允许重试已认领目标，拒绝半成品启动。
+验证后原子发布 OMP 存储指针，启用 `~/.omp-desktop/data` 与 `browser/`（或开发版对应路径）；
+没有导入的新安装直接使用 OMP 根目录。上游源目录保留为手动恢复副本，不登记为可删除的 OMP 备份。
+
+已有私有 OMP profile 不因上游偏好日后损坏、不支持或不可读而无法启动。已完成导入使用
+OMP 自有日志记录的原始源根进行校验，不依赖当前上游配置，因此仍拒绝原自定义源根的别名。
+没有导入日志的已有私有 profile 遇到上游偏好读取失败时，只给出不含内容的通用警告。
+首次导入仍严格校验上游偏好；当前 OMP 偏好或日志出错仍阻止启动。
+
+首次无上游源的干净启动同样写入正常存储决定，避免日后安装 PI-Desktop 时意外导入。
+导入决定拒绝 OMP 根目录符号链接，避免与上游别名共用；重试时源缺失会阻止启动，不把半成品
+替换为空数据。独立 host 回退与忽略默认路径使用相同 OMP 根；OAuth 登录标记跟随解析后的
+桌面数据目录（含所选/自定义根），不硬编码写入上游。
+

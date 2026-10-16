@@ -1225,3 +1225,66 @@ retries and images retain physical account/model attribution. Nested immediate
 parent and owning Task remain distinct. The migration does not add coding-agent
 AgentSession, Codemode or virtual routing. See the coding-agent design review for
 future adoption conditions.
+
+## OMP Desktop P2 fork amendment
+
+在 OMP Desktop fork 中，[omp-native-sessions](../../../adr/omp-native-sessions.md)
+取代上文内嵌 Pi 的执行路径。OMP 是唯一引擎；桌面端仅增加 UI 与严格限定的原生能力，
+不会引入另一个 Agent。
+
+- 会话命令使用允许列表。`goal`、`btw`、`handoff`、慢速模式和缓存预热等有状态操作
+  复用该会话的 RPC 进程，并转发真实响应与事件。Handoff 压缩当前会话；保存的交接产物
+  不是新的可恢复会话。取消不视为成功。
+- Goal 使用 `get/create/pause/resume/drop` 和可选的正数 `token_budget`。
+  BTW 恢复历史、关联流式记录与问题、支持后续话题，并在关闭对话框或导航变化时取消
+  自己的请求。迟到的结果不得更新其他会话。
+- 有限循环由会话运行时持有，次数为 1–50 的整数。只有对应迭代成功结束后才提交下一条提示词。
+  错误、显式中止/停止及 sidecar 关闭都会停止续跑。渲染器重载和切换会话不会转移所有权或
+  重复提交；重启后不会自动恢复付费工作。
+- OMP 不记录的斜杠命令输出先持久化到桌面私有命令输出目录，再发布。
+  调用标识将多帧输出与一条命令输入归组；活动分支锚点防止其他分支的输出混入。
+  只有命令的空会话使用桌面清单，不伪造 OMP 文件。认证/配置输出不持久化；存储失败可见。
+  每条输出仍限制为 64 KiB。这些历史不会成为模型上下文。
+- HTML 导出调用 OMP `export_html`，另附已转义的桌面命令输出附录。
+  只有原生保存对话框成功选定的目标才授予打开/定位能力；拒绝任意路径与符号链接重定向。
+  分享仅保存本地 HTML 和复制路径，不上传，也不生成公开 URL。
+- 提交提示词前注册宿主工具：主显示器截图、安全 HTTP(S)/绝对文件路径打开、文本剪贴板读写。
+  宿主 URI 仅允许 `clipboard://` 和 `clipboard://text`。每项原生操作均须桌面显式同意，
+  不受 OMP 默认审批模式影响。取消按进程、会话和请求隔离；已销毁的所有者不接收迟到回复。
+- 子代理行必须有已知的根级生成工具调用所有者。早到事件等待所有权确认；嵌套、孤立或
+  未知终态事件不创建行。真正属于该会话、零工具调用且已取消的代理仍然显示。
+- 单词补全通过受管理的工具后端调用 `predict_word` 并反馈接受结果。
+  IME、斜杠/文件面板、过期草稿/光标/会话/设置以及已消费或重复按键均不得应用建议。
+  设置变化安全回收空闲运行时，对活动或待决工作延后处理，不中断回合。
+
+### OMP 生产就绪兼容性与恢复
+
+启动 RPC 工作前，对已解析的可执行文件运行 `--version`，只接受稳定版 `>=18.10.0 <19.0.0`。
+未知主版本和预发布版均被拒绝，并显示本地化可操作指引。RPC 必须报告 `protocolVersion: 1`；
+仅版本字符串不能证明协议兼容。保留 Windows `.exe` / `.cmd` 查找及 `PI_DESKTOP_OMP_BIN`
+显式覆盖。缺失/无效可执行文件绝不静默回退到内嵌引擎。
+
+AppShell 就绪后，`OmpCompatibilityNotice` 自动通过既有 `ompCall` IPC 调用允许列表中的
+`omp.capability.check`；没有活动聊天或已关闭新手引导时同样检查。失败显示持续的本地化
+`role="alert"`，含安装/版本指引、重试与关闭操作，不阻止访问设置或配置。
+
+每个桌面创建的 OMP 进程均接收桌面审批模式覆盖，默认为 `write`；不改变用户全局
+`tools.approvalMode`。详见[桌面审批偏好](../04-ux/06-settings-ia.md#桌面独立审批模式)。
+
+进程意外退出会终止当前回合，并分别在 250 ms、1 s、4 s 后尝试有限次数重连。
+恢复继续同一持久会话，保留尚未发送或已确认排队的工作。投递状态不确定的活动请求绝不自动重放；
+显示 `OMP_DELIVERY_UNCERTAIN`，重新发送前应先检查对话。最终恢复失败保留队列并显示
+`OMP_RECOVERY_FAILED`，不得谎报已成功发送。取消/销毁会隔离迟到尝试和响应。
+有限循环在错误或进程关闭后不会自动续跑。
+有限重连耗尽后，既有“继续”操作会发起新的连接尝试；不增加另一套重连 RPC 或恢复界面。
+三次重试预算只在完成一个回合或稳定连接满 30 秒后重置；立即崩溃的替代进程共用同一预算。
+恢复后第一条安全保留消息启动新的 prompt，其余安全条目均按 FIFO 作为 `follow_up` 发送，
+避免原回合退出后旧 steering 越过更早的 follow-up。未获确认的插入保留为不确定条目，
+仅供用户审核，不参与自动投递。
+
+队列条目若带 `deliveryStatus: "uncertain"`，保留原始文本，并在 ComposerStatus 显示
+本地化 `OMP_DELIVERY_UNCERTAIN` 指引。此类条目禁用发送/提升、排序与编辑，仍可移除；
+用户须先检查会话历史，不静默重放。原生恢复通知携带稳定错误码和参数；渲染器用
+`attempt`、`maxAttempts`、`delayMs` 本地化重连进度及连接恢复，不直接显示运行时英文。
+
+

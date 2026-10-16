@@ -204,3 +204,12 @@
 冻结协议仍为 v9，存储架构仍为 v10。未来的变化
 必须保留自动化 M6 场景 E2E-104 到 E2E-117 或更新
 变更合同前的相关决定记录。
+
+## OMP Desktop fork 切换
+
+[OMP 原生会话](../../adr/omp-native-sessions.md) 在本 fork 中取代内嵌 Pi 的 Agent 引擎条款。
+Rust 仍持有 host 设置/项目与 SQLite；OMP 持有 Agent 执行、原生会话文件、模型和凭据。
+桌面存储/锁身份隔离为 `OMP-Desktop{ Dev}` 与 `~/.omp-desktop{,-dev}`，首次启动可经验证
+只读导入上游副本。桌面审批模式通过逐进程 CLI 参数默认为 `write`，不改变用户全局 OMP 模式。
+此次切换不包含语音集成，也不意味着发布。详见 OMP 运行时、存储、安全与交付修订。
+

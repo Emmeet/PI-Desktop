@@ -7600,3 +7600,41 @@ must keep splitting are covered by `markdown-blocks.test.mjs`.
 - Covered by `apps/desktop/test/session-title-prompt-fallback.test.mjs`,
   `apps/desktop/test/queue-pending-actions.test.mjs`, the host-core
   `derive_session_title` tests, and E2E-021a. See ADR 0323.
+
+## 2026-10-16 — OMP Desktop readiness fixes (unreleased fork)
+
+- Preserve the vastsa/PI-Desktop v0.18.0 LGPL-3.0 provenance in README/NOTICE and
+  package resources, with exact-revision corresponding public fork source.
+- Isolate packaged/development OMP lock and data roots. A first managed launch
+  can import a verified read-only upstream copy; never overwrite an OMP profile,
+  mutate the upstream database/WAL or offer upstream source as a deletable backup.
+- Persist a desktop-only `always-ask` / `write` / `yolo` approval mode, default
+  `write`, and override each child CLI without changing global OMP mode. Existing
+  per-tool approval rules keep their shared semantics.
+- Require stable OMP `>=18.10.0 <19.0.0` and RPC protocol 1. Recover crashes with
+  bounded 250 ms/1 s/4 s attempts, same-session resume and queue preservation;
+  never replay uncertain active work. Continue retries after exhaustion.
+- Default the context ring/details/aria to used capacity while preserving an
+  explicit remaining preference. Exact OMP model metadata wins over reported
+  windows; remaining capacity still owns 20%/5% warning/critical thresholds.
+- Explicitly focus new-task name, expose accessible required-name guidance,
+  extend timed delete confirmation to five seconds, and derive provider setup
+  guidance from OMP models. Settings controls are explicitly non-draggable;
+  coordinate regression does not assert the historical 32px root cause.
+- Tighten CSP to local plugin modules and the exact hashed static import map;
+  scope dev connectivity to the actual Vite origin. Main-frame/window IPC
+  ownership and separate preload invoke/event allowlists close cross-surface
+  access. In-process renderer extensions remain trusted code, not sandbox guests.
+- Add dispatch-only native Windows x64 NSIS/ZIP/Portable artifact construction,
+  schema/native inventory/host-handshake checks and distinct file names; never
+  cross-package platform/architecture or publish from this lane. GitHub workflow
+  registration, real Windows delivery and unsigned-platform warnings remain
+  explicit qualification constraints. Automatic updates remain opt-in.
+- Replace 657 existing untranslated non-voice prose leaves across de/es/fr/ko/
+  pt-BR/tr; add localized install/compatibility/recovery, onboarding and task-name
+  guidance in all nine catalogs. Keep technical names, variables and genuine cognates.
+- Repair OMP ADR metadata/index and Chinese runtime/preferences/scenario mirrors.
+  The E2E plan now separates fixture evidence from live StepFun attribution,
+  native screenshot/global-hotkey permissions and actual paid continuations.
+  No voice work, stable release/version bump or upstream PR is included.
+

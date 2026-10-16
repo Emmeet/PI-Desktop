@@ -1895,10 +1895,10 @@ Single message render — either user (plaintext) or assistant (markdown streami
   usage exists. The trigger keeps a small capacity ring beside the
   percentage and omits the redundant `Context` label; the leading figure
   (ring arc, percentage, token label, popover heading, tooltip, and
-  `aria-label`) follows `settings.contextUsageDisplay` — `"remaining"`
-  (default) or `"used"` — so the ring fills by `remainingRatio` or
-  `usedRatio` accordingly. Low capacity changes the semantic color based
-  on remaining capacity (remaining ≤ 25 % warning, ≤ 10 % critical)
+  `aria-label`) follows `settings.contextUsageDisplay` — `"used"` (default,
+  including absent/invalid values) or explicitly selected `"remaining"` — so the
+  ring fills by `usedRatio` or `remainingRatio` accordingly. Low capacity changes
+  the semantic color based on remaining capacity (remaining ≤ 20 % warning, ≤ 5 % critical)
   regardless of display mode, without making color the only signal.
   Clicking the trigger (or activating it from the keyboard) toggles a
   non-modal panel whose heading follows the same display-mode figure,
@@ -1917,7 +1917,10 @@ Single message render — either user (plaintext) or assistant (markdown streami
   context-window total uses the same effective model window as the agent
   sidecar: a published models.dev `limit.context` replaces a legacy 128k
   generic binding seed, while a non-default per-model Advanced value remains
-  explicit. Unknown models use the provider's generic default window. The
+  explicit. Unknown models use the provider's generic default window.
+  For OMP, exact `provider/model` metadata takes precedence over the reported
+  session window; absent/invalid metadata falls back to a valid reported window,
+  then 128k. No StepFun window is inferred from a display name or another role. The
   panel is portaled to the document body as a fixed viewport overlay, flips
   above or below the trigger, clamps its horizontal bounds to the
   conversation pane — the work panel's native browser/plugin surfaces
@@ -4162,6 +4165,11 @@ Sidebar footer                                        Popover (360px max)
 Read and operate scheduled tasks: what each task did last, what it will do next,
 and the transcript of any run — without leaving the route. See
 [desktop automations](../../adr/scheduled-desktop-automations.md) and issue #1291.
+
+The create-task dialog explicitly focuses the name input on mount. An empty or
+whitespace-only name shows a localized visible hint connected with
+`aria-describedby` and `aria-invalid`; Save stays disabled and submission remains
+guarded until the name and the other required task fields are valid.
 
 ### 20A.2 Anatomy
 

@@ -17294,3 +17294,36 @@ Specs: [OMP runtime amendment](../03-runtime/02-agent-runtime.md#omp-desktop-p2-
 Status: automated boundaries and isolated renderer paths; physical global-key
 delivery, Windows/macOS screenshot permission and live provider-generated
 BTW/handoff/goal continuations require separate platform/provider authorization.
+
+## OMP Desktop production-readiness scenarios
+
+The 2026-10-14 exploratory report is historical evidence, not proof that every
+request used `stepfun/step-5-preview`: some used the default `gpt-6.1-sol` role.
+Do not relabel those screenshots or infer model capability from the wrong role.
+For each live repetition, record role name, exact `provider/model`, OMP version,
+thinking level, requested/available fast/slow settings, actual engine response,
+platform, screenshot and session/event evidence before claiming a pass.
+
+| Scenario | User sequence and expected result | Coverage / qualification boundary |
+| --- | --- | --- |
+| OMP-READY-Windows | Build native x64; install/extract each distinct NSIS/ZIP/Portable artifact; launch, locate `omp.exe` / `omp.cmd`, send a model message, run approved/denied tools, read the user's `.omp` via omp. Record run URL and hashes, not a Linux cross-build claim. | `windows-packaging.test.mjs`, `verify-windows-package.mjs`, manual Windows/provider qualification |
+| OMP-READY-isolation | Run upstream and OMP simultaneously with independent locks/data; first launch imports a closed upstream source without changing any bytes, including WAL/SHM, then reopen/restart. Exercise custom/missing volumes, failed retry, no-source first decision, existing OMP data and explicit-root/profile opt-out. | `storage-maintenance.test.mjs`, desktop identity tests and Rust storage-relocation WAL regression |
+| OMP-READY-approval | With global mode left at yolo, fresh desktop defaults to write. Read proceeds, edit prompts; test approve/deny/session/always and stop cancellation. Save/reopen always-ask and yolo; switching mode does not resolve an existing card or change global mode. | `omp-approval-policy.test.mjs`, `omp-approval-user-path.test.mjs`; scripted engine events are not real-provider approval proof |
+| OMP-READY-compatibility | Exercise missing exe/cmd, failed version probe, old/unknown/prerelease version and wrong protocol, then a supported stable OMP 18 build. Each failure gives localized install/path/version guidance without a fallback engine. | Runtime OMP binary/RPC regressions; native Windows executable delivery still platform-specific |
+| OMP-READY-reconnect | Exit the active process with queued work; observe 250 ms/1 s/4 s recovery, same saved session, retained queue and no uncertain active-message replay. Cancel/dispose during retry; exhaust retries and use Continue for a fresh attempt. | Runtime OMP spawned-RPC regressions; provider billing/history must be checked separately |
+| OMP-READY-context | With no preference, short messages show low used capacity that grows monotonically; ring, tooltip, heading and aria agree. Explicit remaining stays preserved. Exact StepFun metadata wins; invalid/missing metadata falls back to reported window then 128k; warnings use 20%/5% remaining. | `context-usage.test.mjs`, `omp-ui-interactions-user-path.test.mjs`; no invented StepFun context limit |
+| OMP-READY-settings | In a short scrollable Settings window, click label center and painted row top/bottom before/after filtering; the displayed destination always matches. Interactive controls are explicitly non-draggable. | `omp-ui-interactions-user-path.test.mjs` tests Linux Electron with linux/win32/darwin CSS branches, not native Windows/macOS delivery; the historical 32px root cause is not claimed proven |
+| OMP-READY-task-delete | Open task creation and type immediately into focused name. Empty/whitespace name shows accessible localized guidance and cannot save; valid name/prompt saves. Arm delete; confirm at 4999ms, expire at 5000ms; row change/cancel/unmount cleans the arm. | `omp-ui-interactions-user-path.test.mjs`, `scheduled-workspace.test.mjs` |
+| OMP-READY-onboarding | With completed project/plugin setup but no OMP models, show provider/sign-in guidance. Open Accounts, return/refocus after external setup; available models remove the step. Query failure differs from no models; persisted dismissal wins. | `omp-ui-interactions-user-path.test.mjs`; no user's provider config or secrets modified |
+| OMP-READY-security | Production rejects arbitrary inline/eval/blob scripts and loopback connections while hashed importmap/shared React and permitted renderer extensions load. Unknown/navigated/subframe IPC and invoke/event misuse fail; launcher/widget capabilities remain narrow; all Electron surfaces keep sandbox/contextIsolation on and Node integration off. | `renderer-security.test.mjs` after production build, ownership/preload and chat-window regressions; trusted in-process renderer extensions remain a residual trust boundary |
+| OMP-READY-locales-notices | Select de/es/fr/ko/pt-BR/tr and exercise imports/cloud sync, OMP settings, task validation, install/recovery and onboarding. Preserve variables/technical names, not English prose clones. Read fork/upstream/license/source notices in README and package resources. | Existing i18n key/placeholder suite, docs mechanical checks, package inventory; native-language user review remains valuable |
+| OMP-READY-live-StepFun | Explicitly select StepFun role and exact `stepfun/step-5-preview`; exercise supported reasoning, unsupported fast state, read/bash/edit tools, BTW follow-up, handoff, goal continuation, finite loop, slow readback and cache warming. Record provider capability responses and costs. | Requires authorized live provider; fixture pass does not prove paid execution, billing semantics or unsupported capabilities |
+| OMP-READY-native-permissions | On real Windows/macOS, approve/deny screenshot access and deliver/rebind global hotkeys without system conflicts; verify native controls in two chat windows. | Physical-platform qualification required, not CSS branches or private-X evidence |
+| OMP-READY-startup-alert-uncertain-queue | Start without active chat and with onboarding dismissed; missing/incompatible OMP automatically shows localized persistent alert with Retry/Dismiss while settings stay usable. Retry after correction. Retain uncertain queued text/warning; send/promote/reorder/edit remain disabled, Remove works. Structured reconnect progress and completion use the active locale. | `omp-startup-recovery-user-path.test.mjs`; existing allow-listed `omp.capability.check` over `ompCall`, no new IPC or paid provider required |
+
+Status is **not run here** for native Windows/macOS and live-provider qualification
+until the integration owner records actual executions. Credential-free regressions
+must also be recorded from the final integrated candidate, not inferred from this
+plan. No voice tests, global approval-mode edits, release or upstream PR are part
+of these scenarios. Updates stay opt-in and unsigned packages still show platform warnings.
+

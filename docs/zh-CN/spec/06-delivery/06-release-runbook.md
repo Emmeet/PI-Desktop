@@ -548,3 +548,36 @@ electron PI-Desktop-<version>-linux-<arch>.asar
   arm64。语音转写（`transcribe-cpp` 随附 `linux-arm64-cpu-vulkan` 包）以及
   其余所有功能在任何 arm64 Linux 设备上都可用。
 - 回滚、分阶段部署和预发布渠道政策仍是开放的发布工作。现有未签名 macOS 安装可能需要先手动安装一次已签名 DMG，之后应用内更新才能成功。
+
+## OMP Desktop Windows 仅产物构建通道
+
+fork 的 `.github/workflows/omp-windows.yml` 仅手动触发，在原生 `windows-latest`
+x64 MSVC runner 上使用工作区固定的 pnpm、Node 24 x64 与稳定版 x64 Rust，
+在 Windows 安装 frozen lockfile 并运行 `pnpm --filter @pi-desktop/desktop run dist:win --x64`。
+它没有 push/tag 触发，不发布、不签名；仓库权限仅 `contents: read`，不使用提供商凭据或签名密钥。
+
+`scripts/build-desktop-release.mjs` 拒绝不匹配的平台/架构；Linux 交叉打包无法验证 Windows
+Rust host 和原生依赖。NSIS、ZIP、Portable 分别构建，文件名分别为：
+
+- `OMP-Desktop-Setup-${version}-${arch}.exe`
+- `OMP-Desktop-${version}-win-${arch}.zip`
+- `OMP-Desktop-Portable-${version}-${arch}.exe`
+
+通道执行 `windows-packaging.test.mjs`、隔离 OMP 二进制发现测试及
+`node scripts/verify-windows-package.mjs`。验证器检查 PE/原生依赖、临时 profile 中真实
+打包 host 握手、产物命名及包内 `resources/LICENSE` / `resources/NOTICE`。
+产物以 `omp-desktop-windows-x64-<run_number>` 保存 14 天，不发布 GitHub Release 或更新源。
+配置了 workflow 不代表已经在 Windows 跑过；必须另行记录运行 URL 与下载产物哈希。
+
+GitHub 要求 `workflow_dispatch` 已在仓库默认分支注册；仅存在于请求分支的 workflow
+可能无法派发。不得仅为绕过此条件而合并或发布；原生本地 Windows 可执行相同安装/构建/验证命令。
+
+构建后仍需在 Windows 安装/解压并验证启动、`omp.exe` / `omp.cmd` 发现、真实模型消息、
+工具同意/拒绝、通过 omp 使用隔离的 `C:\Users\<user>\.omp` 配置、截图权限和全局快捷键。
+未签名产物仍会触发 SmartScreen 未知发布者提示。真实提供商授权和实体 Windows 验证与
+无凭据 CI 分开记录；语音不在此次范围内。
+
+自动更新仍须显式开启（`PI_DESKTOP_ENABLE_UPDATES=1`）；此通道不发布 fork 版本。
+在有意发布对应 fork Release 前，使用手动源码/安装包升级。依据根 NOTICE 保留上游 LGPL-3.0
+归属并提供精确修订的公开对应源码。
+

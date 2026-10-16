@@ -1,6 +1,6 @@
-# omp (oh-my-pi) as the agent engine
+# ADR omp-native-sessions: omp (oh-my-pi) as the agent engine
 
-Status: Accepted (fork `feat/omp-support`)
+- Status: Accepted (OMP Desktop fork)
 
 ## Decision
 

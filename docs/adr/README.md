@@ -20,6 +20,7 @@ Each ADR includes:
 
 | ID | Title | Status |
 |---|---|---|
+| omp-native-sessions | [omp (oh-my-pi) as the agent engine](omp-native-sessions.md) | Accepted |
 | composer-mcp-invocations | [Composer MCP Invocations](composer-mcp-invocations.md) | Accepted |
 | chronological-system-transcript | [Preserve chronological model system state](chronological-system-transcript.md) | Accepted |
 | mcp-tool-approval-risk | [User MCP tools keep the normal approval path](mcp-tool-approval-risk.md) | Accepted |

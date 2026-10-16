@@ -1795,7 +1795,7 @@ future adoption conditions.
 
 ## OMP Desktop P2 fork amendment
 
-On `feat/omp-support`, [omp-native-sessions](../../adr/omp-native-sessions.md)
+In the OMP Desktop fork, [omp-native-sessions](../../adr/omp-native-sessions.md)
 supersedes the embedded-Pi execution sections above. OMP remains the sole engine;
 the desktop adds UI and narrowly scoped native capabilities, not another agent.
 
@@ -1835,3 +1835,49 @@ the desktop adds UI and narrowly scoped native capabilities, not another agent.
   utility backend. IME, slash/file palettes, stale drafts/cursors/session/settings,
   and consumed/repeated keys must not apply suggestions. Settings recycle idle
   runtimes safely and defer active/pending work rather than interrupting turns.
+
+### OMP production-readiness compatibility and recovery
+
+Before starting RPC work, probe the resolved executable with `--version` and
+require a stable `>=18.10.0 <19.0.0` release. Reject unknown majors and prereleases
+with localized, actionable compatibility guidance. RPC must report
+`protocolVersion: 1`; a version string alone is not proof of protocol support.
+Binary lookup keeps Windows `.exe` / `.cmd` discovery and the explicit
+`PI_DESKTOP_OMP_BIN` override. Missing/invalid executables never become a silent
+fallback to an embedded engine.
+
+Once AppShell is ready, `OmpCompatibilityNotice` automatically invokes the
+allow-listed `omp.capability.check` through existing `ompCall` IPC, including with
+no active chat and after onboarding dismissal. Failure shows a persistent,
+localized `role="alert"` with installation/version guidance, Retry and Dismiss.
+It never prevents access to settings or configuration.
+
+Every desktop-created OMP process receives the desktop approval-mode override,
+defaulting to `write`; it never changes the user's global `tools.approvalMode`.
+See [desktop approval preferences](../04-ux/06-settings-ia.md#desktop-only-approval-mode).
+
+Unexpected process exit stops the in-flight turn and starts bounded reconnect
+attempts after 250 ms, 1 s and 4 s. Recovery resumes the same persisted session
+and retains unsent or confirmed queued work. An active request with uncertain
+delivery is never automatically replayed: surface `OMP_DELIVERY_UNCERTAIN` and
+require conversation inspection before resending. Final recovery failure keeps
+the queue and exposes `OMP_RECOVERY_FAILED`, not a false successful send.
+Cancellation/disposal fences late attempts and responses. Finite loops do not
+resume automatically after failure or process shutdown.
+After bounded recovery is exhausted, the existing Continue action creates a fresh
+connection attempt; there is no additional reconnect RPC or second recovery UI.
+The three-attempt budget resets only after a completed turn or 30 seconds of
+stable connection; immediately crashing replacement processes share that budget.
+On resume, the first safe preserved entry starts a new prompt; subsequent safe
+entries are sent FIFO as `follow_up`, so old steering cannot overtake an older
+follow-up after the interrupted turn has died. Unacknowledged insertions remain
+uncertain entries for user review and are excluded from automatic delivery.
+
+Queued entries with `deliveryStatus: "uncertain"` retain their original text and
+show localized `OMP_DELIVERY_UNCERTAIN` guidance in ComposerStatus. Send/promote,
+reorder and edit actions are disabled for such entries; Remove remains available.
+The user must inspect conversation history rather than silently replaying them.
+Structured native recovery notices carry stable codes and parameters; the renderer
+localizes reconnect progress using `attempt`, `maxAttempts` and `delayMs`, and
+localizes successful reconnection instead of displaying raw English runtime text.
+

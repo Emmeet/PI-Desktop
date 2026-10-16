@@ -267,7 +267,7 @@ may be retained while exactly one workspace supplies the visible shell context.
 - **Delete** removes a session or a project permanently and takes two clicks:
   the first arms the overflow item and relabels it (`nav.deleteTaskConfirm` /
   `project.deleteMenuConfirm`), and only the second click removes the row. The
-  arm expires on its own, so a row never stays one stray click away from a
+  arm expires after five seconds, so a row never stays one stray click away from a
   permanent delete, and the folder on disk is never touched. A project whose
   turn is still live still opens the confirmation dialog that names those
   sessions and stops them first; an idle project is removed on that second

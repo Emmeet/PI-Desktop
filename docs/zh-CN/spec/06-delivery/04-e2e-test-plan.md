@@ -9513,3 +9513,57 @@ host-created files. The full app's file-preview viewer is covered separately.
 - **步骤：**为目录发布 1M 的模型保存 500K 用户额度。打开 Composer 模型列表，然后发送一条简短消息并检查上下文用量。对目录管理的额度以及模型发现不可用的情况重复验证。
 - **预期：**用户配置的模型行和上下文检查器显示 500K；目录管理的额度跟随已发布值；没有发现信息的已配置模型仍显示保存的额度。模型选择保持不变。
 - **状态：**`apps/desktop/test/composer-models.test.mjs` 自动覆盖用户覆盖值、目录继承值及发现不可用时保留额度；完整的“保存 → 模型列表 → 发送消息 → 上下文检查器”路径仍需手动验证。
+
+## OMP Desktop P2 fork scenarios
+
+这些 fork 场景使用隔离的 profile、项目和显示器。IPC/JSONL fixture 测试不代表真实提供商请求；
+不得使用用户正在运行的桌面实例或凭据。语音（缺口项 22）仍不在范围内。
+
+| 场景 | 用户操作与预期结果 | 自动化覆盖 |
+| --- | --- | --- |
+| OMP-P2-export-share | 取消保存、保存失败后重试、导出 HTML；只打开/定位/复制所选且已验证的文件。不上传，不授予任意路径权限。 | `omp-export-html.test.mjs`、`omp-session-actions-user-path.test.mjs`、运行时 `omp-p2.test.ts` |
+| OMP-P2-session-actions | 设置/暂停/恢复/移除 Goal 与预算；恢复/继续/取消 BTW；Handoff 仅在成功后刷新当前会话。迟到导航结果不得影响其他聊天。 | `omp-session-actions.test.mjs`、`omp-session-actions-user-path.test.mjs`、运行时 `omp-p2.test.ts` |
+| OMP-P2-loop | 启动有限循环，切换/重载渲染器，恰好执行所选次数；显式中止/错误后停止，sidecar 关闭后绝不自动续跑。 | 运行时 `omp-p2.test.ts`、`omp-session-actions-user-path.test.mjs` |
+| OMP-P2-native-tools | 同意/拒绝截图、打开、剪贴板及剪贴板 URI；拒绝非法输入；按所有者取消待决工作并显示传输失败。捕获实际主显示器。 | `omp-host-tools.test.mjs`；私有 X 显示器原生截图/剪贴板冒烟 |
+| OMP-P2-file-mention | 输入 `@`、选择含空格的路径，观察原子 chip 和准确引用的发送文本。读取待决时切换项目，不得留下过期路径；IME 提交前冻结筛选。 | `omp-file-mention-user-path.test.mjs` |
+| OMP-P2-preferences | 保存/回读 LSP/Git/Commit/提供商设置；切换深浅主题并关闭令牌联动；响应配置广播。仅接受一次本地预测；拒绝过期/IME/面板/禁用状态结果。 | `omp-preferences.test.mjs`、`omp-word-prediction.test.mjs`、`omp-preferences-user-path.test.mjs` |
+| OMP-P2-windows-hotkeys | 打开两个独立聊天渲染器，原生控件路由到调用窗口，广播配置，关闭后清理所有权。拒绝外部/子框架发送者；自定义 OMP/全局快捷键并尊重覆盖层和 IME。 | `omp-chat-windows.test.mjs`、`omp-hotkeys.test.mjs` |
+| OMP-P2-command-persistence | 运行多帧斜杠命令，重新选择/重启原始 ID，再生成引擎文件；输入输出保持归组且分支隔离。私密输出不恢复。 | 运行时 `command-output-store.test.ts`、`omp-p2.test.ts`；真实隔离 OMP 冒烟 |
+| OMP-P2-subagent-ownership | 接收根级/早到/嵌套/孤立/终态生命周期帧；仅渲染有所有者的根级代理。真实取消的零工具代理仍然显示。 | 运行时 `omp-p2.test.ts` |
+| OMP-P2-mcp-remove | 选择移除，显示带服务名的中文确认框；取消保留服务；双击确认不重复删除；失败后可重试。 | `omp-mcp-remove-user-path.test.mjs` |
+
+规格：[OMP 运行时修订](../03-runtime/02-agent-runtime.md#omp-desktop-p2-fork-amendment)、
+[OMP 偏好设置](../04-ux/06-settings-ia.md#omp-desktop-p2-fork-preferences)、
+[OMP 决策](../../../adr/omp-native-sessions.md#p2-desktop-integration-amendment)。
+状态：自动化覆盖边界与隔离渲染器路径；实体全局快捷键、Windows/macOS 截图权限、真实提供商
+驱动的 BTW/Handoff/Goal 续跑仍须另行获取平台/提供商授权并验证。
+
+## OMP Desktop 生产就绪场景
+
+2026-10-14 的探索报告是历史证据，不能证明每次请求都使用 `stepfun/step-5-preview`：
+其中有请求实际使用默认 `gpt-6.1-sol` 角色。不得重标旧截图，或用错误角色推断模型能力。
+每次真实复测必须记录角色、精确 `provider/model`、OMP 版本、推理等级、fast/slow 请求与
+可用状态、真实引擎响应、平台、截图及会话/事件证据，才能宣告通过。
+
+| 场景 | 用户操作与预期结果 | 覆盖 / 验证边界 |
+| --- | --- | --- |
+| OMP-READY-Windows | 原生 x64 构建；安装/解压各自命名的 NSIS/ZIP/Portable；启动、发现 `omp.exe` / `omp.cmd`、发消息、同意/拒绝工具、经 omp 读取用户 `.omp`。记录运行 URL 和哈希，不能用 Linux 交叉构建代替。 | `windows-packaging.test.mjs`、`verify-windows-package.mjs`；手动 Windows/提供商验证 |
+| OMP-READY-isolation | 上游与 OMP 同时运行，锁/数据独立；首次导入已关闭上游且所有源字节（含 WAL/SHM）不变，再重开/重启。覆盖自定义/缺失磁盘、失败重试、无源首次决定、已有 OMP 数据及显式目录/profile 排除。 | `storage-maintenance.test.mjs`、桌面身份测试、Rust 存储重定位 WAL 回归 |
+| OMP-READY-approval | 不改全局 yolo，桌面首次默认为 write；read 直接运行、edit 提示；验证单次/拒绝/会话/始终允许和停止取消。保存/重开 always-ask/yolo；切换模式不解决已有卡片，不改全局模式。 | `omp-approval-policy.test.mjs`、`omp-approval-user-path.test.mjs`；脚本引擎事件不代表真实提供商审批验证 |
+| OMP-READY-compatibility | 覆盖缺失 exe/cmd、版本探测失败、过旧/未知/预发布版本、错误协议及支持的稳定 OMP 18。所有失败有本地化安装/路径/版本指引，不回退内嵌引擎。 | 运行时 OMP 二进制/RPC 回归；Windows 原生执行仍需平台验证 |
+| OMP-READY-reconnect | 活动进程退出且有队列，观察 250 ms/1 s/4 s 恢复、同一持久会话、队列保留、不重放不确定消息。重试期间取消/销毁；耗尽后用“继续”重新连接。 | 运行时 OMP 派生 RPC 回归；提供商计费/历史需另行核对 |
+| OMP-READY-context | 未设置偏好时短消息显示低已用量并随使用增长；环/tooltip/标题/aria 一致。保留显式 remaining。精确 StepFun 元数据优先，无效/缺失回退报告值再 128k；剩余 20%/5% 改变警告色。 | `context-usage.test.mjs`、`omp-ui-interactions-user-path.test.mjs`；不编造 StepFun 窗口 |
+| OMP-READY-settings | 较矮可滚动设置窗口中，筛选前后点击标签中心及整行上/下边缘均打开对应目的地；交互控件明确禁止拖拽。 | `omp-ui-interactions-user-path.test.mjs` 在 Linux Electron 验证 linux/win32/darwin CSS 分支，不代表原生 Windows/macOS；不宣称已证实旧 32px 根因 |
+| OMP-READY-task-delete | 新建任务后立即输入到已聚焦的名称。空/全空白名称显示可访问本地化提示且不能保存；有效名称/指令可保存。删除武装 4999ms 可确认，5000ms 失效；换行/取消/卸载清理状态。 | `omp-ui-interactions-user-path.test.mjs`、`scheduled-workspace.test.mjs` |
+| OMP-READY-onboarding | 项目/插件完成但 OMP 无模型时显示提供商/登录引导；打开账号，外部配置后返回/聚焦刷新，模型就绪移除步骤。查询失败区别于无模型；保留关闭偏好。 | `omp-ui-interactions-user-path.test.mjs`；不修改用户配置或密钥 |
+| OMP-READY-security | 生产拒绝任意内联/eval/blob 脚本及环回连接，哈希 importmap/共享 React 与获准渲染器扩展正常加载。未知/导航/子框架 IPC 与 invoke/事件误用失败；启动器/小组件权限收敛；全部窗口保持 sandbox/contextIsolation 开、Node integration 关。 | 生产构建后 `renderer-security.test.mjs`、所有权/preload/聊天窗口回归；可信进程内渲染器扩展仍是剩余信任边界 |
+| OMP-READY-locales-notices | 切换 de/es/fr/ko/pt-BR/tr，操作导入/云同步、OMP 设置、任务校验、安装/恢复及引导。保留变量/技术名，不保留英文整句克隆；核对 README 和包内上游/许可/源码声明。 | 既有 i18n 键/变量套件、文档机械检查、打包清单；仍建议母语使用者审核 |
+| OMP-READY-live-StepFun | 明确选择 StepFun 角色及精确 `stepfun/step-5-preview`，验证支持的推理、不支持 fast 的状态、read/bash/edit、BTW 后续、handoff、goal 续跑、有限循环、slow 回读和缓存预热；记录能力响应和成本。 | 须真实提供商授权；fixture 通过不能证明付费执行、计费语义或不支持的能力 |
+| OMP-READY-native-permissions | 真实 Windows/macOS 同意/拒绝截图权限，投递/重绑无冲突全局快捷键，验证两个聊天窗口原生控件。 | 须实体平台验证，不能用 CSS 分支或私有 X 显示器代替 |
+| OMP-READY-startup-alert-uncertain-queue | 无活动聊天且已关闭引导时启动；OMP 缺失/不兼容自动显示持续本地化警告，含重试/关闭，设置仍可用；修正后重试。保留不确定队列文本/警告，禁用发送/提升/排序/编辑但可移除；结构化重连进度与完成通知使用当前语言。 | `omp-startup-recovery-user-path.test.mjs`；既有 `ompCall` 上允许的 `omp.capability.check`，不新增 IPC，不需付费提供商 |
+
+原生 Windows/macOS 与真实提供商场景在集成负责人记录实际运行前，状态均为**此处未运行**。
+无凭据回归同样须在最终集成候选上实际执行并记录，不从计划推断。此次不做语音测试、
+全局审批模式修改、发布或上游 PR；更新仍显式开启，未签名包仍显示系统警告。
+
+
