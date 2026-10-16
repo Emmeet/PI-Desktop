@@ -444,6 +444,30 @@ test("macOS signing instrumentation stays out of the Windows and Linux lanes", (
   assert.doesNotMatch(unsignedBlock, instrumentation);
 });
 
+test("the OMP Windows lane builds natively, verifies, and never publishes", async () => {
+  const [ompWindowsWorkflowSource, readmeSource, noticeSource] = await Promise.all([
+    read("../../../.github/workflows/omp-windows.yml"),
+    read("../../../README.md"),
+    read("../../../NOTICE"),
+  ]);
+  // Dispatch-only: no push or tag may ever start this lane.
+  assert.match(ompWindowsWorkflowSource, /^on:\n  workflow_dispatch:/m);
+  assert.doesNotMatch(ompWindowsWorkflowSource, /\n  push:/);
+  assert.doesNotMatch(ompWindowsWorkflowSource, /\n  pull_request:/);
+  assert.doesNotMatch(ompWindowsWorkflowSource, /release:|createRelease|softprops/);
+  assert.match(ompWindowsWorkflowSource, /runs-on: windows-latest/);
+  assert.match(ompWindowsWorkflowSource, /toolchain: stable-x86_64-pc-windows-msvc/);
+  assert.match(ompWindowsWorkflowSource, /run: pnpm --filter @pi-desktop\/desktop run dist:win --x64/);
+  assert.match(ompWindowsWorkflowSource, /node --test apps\/desktop\/test\/windows-packaging\.test\.mjs/);
+  assert.match(ompWindowsWorkflowSource, /node scripts\/verify-windows-package\.mjs/);
+  assert.match(ompWindowsWorkflowSource, /if-no-files-found: error/);
+  assert.match(ompWindowsWorkflowSource, /apps\/desktop\/release\/OMP-Desktop-Setup-\*-x64\.exe/);
+  // The LGPL-3.0 provenance the lane packages must exist in the tree.
+  assert.match(readmeSource, /vastsa\/PI-Desktop v0\.18\.0/);
+  assert.match(readmeSource, /LGPL-3\.0/);
+  assert.match(noticeSource, /vastsa\/PI-Desktop v0\.18\.0/);
+});
+
 test("GitHub releases trigger the CNB mirror pipeline with a JSON payload", () => {
   assert.match(
     mirrorToCnbWorkflowSource,
