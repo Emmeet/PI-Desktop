@@ -195,7 +195,7 @@ const LAYOUT_CACHE_MAX_LAG: u64 = 4 * 1024 * 1024;
 #[cfg(unix)]
 fn file_identity(meta: &fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
-    meta.ino().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ ((meta.dev() as u64) << 17)
+    meta.ino().wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (meta.dev() << 17)
 }
 
 #[cfg(not(unix))]
@@ -1131,8 +1131,7 @@ pub fn read_transcript_window_with_layout(
                 .compaction_offsets
                 .iter()
                 .copied()
-                .filter(|offset| *offset < window_start)
-                .next_back()
+                .rfind(|offset| *offset < window_start)
             {
                 picked.push(active);
             }

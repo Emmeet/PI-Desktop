@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { loadStyles } from "./helpers/styles.mjs";
+import { desktopReleaseCommands } from "../../../scripts/build-desktop-release.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -24,7 +25,6 @@ const [
   appSource,
   stylesSource,
   pkgSource,
-  buildReleaseSource,
   releaseWorkflowSource,
   enSource,
   zhSource,
@@ -44,7 +44,6 @@ const [
   readAppSource(),
   loadStyles(),
   read("../package.json"),
-  read("../../../scripts/build-desktop-release.mjs"),
   read("../../../.github/workflows/release.yml"),
   read("../../../packages/i18n/src/locales/en/index.ts"),
   read("../../../packages/i18n/src/locales/zh-CN/index.ts"),
@@ -292,29 +291,13 @@ test("packaging publishes an electron-updater feed for GitHub Releases", () => {
     ["--rpm-rpmbuild-define", "_build_id_links none"],
     "rpm build-id configuration",
   );
-  // GitHub asset URLs mangle spaces; keep Windows artifact names space-free.
-  assert.equal(pkg.build.nsis.artifactName, "OMP-Desktop-Setup-${version}.${ext}");
-  const winTargets = pkg.build.win.target.map((entry) => entry.target);
-  assert.deepEqual(winTargets, ["nsis", "zip", "portable"], "Windows release targets");
-  assert.equal(pkg.build.portable.artifactName, "OMP-Desktop-Portable-${version}.${ext}", "portable artifact name");
-  assert.equal(
-    pkg.build.win.artifactName,
-    "OMP-Desktop-Portable-${version}.${ext}",
-  );
-  assert.equal(pkg.build.extraMetadata.piDistribution, "installed");
-  assert.match(pkg.scripts["dist:win"], /build-desktop-release\.mjs win/);
-  assert.match(buildReleaseSource, /"--win",\s*"nsis"/);
-  assert.match(buildReleaseSource, /"--win",\s*"zip"/);
-  assert.match(buildReleaseSource, /"--win",\s*"portable"/);
-  assert.match(buildReleaseSource, /piDistribution=portable/);
-  assert.match(buildReleaseSource, /"--publish",\s*"never"/);
-  assert.match(buildReleaseSource, /piDistribution=installed/);
-  assert.match(buildReleaseSource, /piDistribution=zip/);
-  assert.match(
-    buildReleaseSource,
-    /shell:\s*process\.platform === "win32"/,
-    "Windows must launch the pnpm.cmd shim through a shell",
-  );
+  // Each Windows artifact has the updater policy that its consumer receives.
+  const commands = desktopReleaseCommands(["win"], { platform: "win32", arch: "x64" });
+  assert.deepEqual(commands, [
+    ["--win", "nsis", "--publish", "never", "-c.extraMetadata.piDistribution=installed"],
+    ["--win", "zip", "--publish", "never", "-c.extraMetadata.piDistribution=zip"],
+    ["--win", "portable", "--publish", "never", "-c.extraMetadata.piDistribution=portable"],
+  ]);
   // The upload step must carry every updater feed, and the release publishes
   // all platforms unfiltered (D126/D285).
   assert.match(releaseWorkflowSource, /release\/\*\.zip/);

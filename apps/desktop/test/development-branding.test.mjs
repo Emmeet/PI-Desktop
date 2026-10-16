@@ -76,7 +76,7 @@ test("Windows packages and windows use the canonical PI-Desktop icon", () => {
 });
 
 test("Linux packages align the desktop entry with the Wayland app identity", () => {
-  assert.equal(packageJson.desktopName, "pi-desktop.desktop");
+  assert.equal(packageJson.desktopName, "omp-desktop.desktop");
   assert.equal(packageJson.build.linux.syncDesktopName, true);
 });
 
@@ -122,11 +122,12 @@ test("macOS development launches from a branded host bundle", () => {
   assert.match(devScriptSource, /process\.platform === "darwin"/);
   assert.match(devScriptSource, /PI_DESKTOP_DEV: "1"/);
   assert.match(devScriptSource, /ELECTRON_EXEC_PATH/);
+  assert.match(devScriptSource, /APP_NAME = "OMP-Desktop"/);
   assert.match(devScriptSource, /CFBundleDisplayName", APP_NAME/);
   assert.match(devScriptSource, /CFBundleName", APP_NAME/);
   assert.match(devScriptSource, /CFBundleExecutable", APP_NAME/);
   assert.match(devScriptSource, /CFBundleIconFile", "icon\.icns"/);
-  assert.match(devScriptSource, /BRANDING_SCHEMA = "v4"/);
+  assert.match(devScriptSource, /BRANDING_SCHEMA = "v5"/);
   assert.match(
     devScriptSource,
     /copyFileSync\(iconPath, join\(resources, "icon\.icns"\)\)/,
@@ -226,8 +227,8 @@ test(
         ),
         "macOS-tray-icon",
       );
-      assert.match(plist, /<string>PI-Desktop<\/string>/);
-      assert.match(plist, /<string>net\.aiuo\.pi-desktop\.dev<\/string>/);
+      assert.match(plist, /<string>OMP-Desktop<\/string>/);
+      assert.match(plist, /<string>io\.github\.emmeet\.omp-desktop\.dev<\/string>/);
       assert.equal(prepareMacDevelopmentBundle(options), brandedExecutable);
 
       await writeFile(trayIconMacPath, "updated-macOS-tray-icon");

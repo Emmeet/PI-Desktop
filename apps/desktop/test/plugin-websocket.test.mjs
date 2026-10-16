@@ -301,10 +301,18 @@ test("a timed-out connect refuses and leaves nothing behind", async () => {
     connectTimeoutMs: 20,
   });
 
-  await assert.rejects(
-    registry.connect({ pluginId: PLUGIN_ID, url: "wss://voice.example.com/live" }),
-    (error) => error.code === "TIMEOUT",
-  );
+  // The registry unrefs its connect timer so a hung socket cannot keep the app
+  // alive; a fixture with nothing else pending would drain the loop first. One
+  // live interval stands in for the connection attempt a real socket holds.
+  const keepAlive = setInterval(() => {}, 5);
+  try {
+    await assert.rejects(
+      registry.connect({ pluginId: PLUGIN_ID, url: "wss://voice.example.com/live" }),
+      (error) => error.code === "TIMEOUT",
+    );
+  } finally {
+    clearInterval(keepAlive);
+  }
   assert.deepEqual(registry.list(PLUGIN_ID), []);
   assert.deepEqual(transport.calls.terminates, ["wss://voice.example.com/live"]);
 });

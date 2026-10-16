@@ -49,8 +49,8 @@ test("assistant error messages expose readable provider details and one Continue
 
 // Issue #234: the localized NETWORK_ERROR summary cannot tell DNS from TLS from
 // a dropped socket, so both failure surfaces render the transport errno next to
-// the stable code.
-test("network failures show the transport errno beside the error code", async () => {
+// the stable code. Awaited, because its reads outlive the parent's body.
+await test("network failures show the transport errno beside the error code", async () => {
   const [transcript, activityGroup] = await Promise.all([
     readTranscriptSource(),
     read("src/features/chat/transcript/ActivityGroup.tsx"),

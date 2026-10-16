@@ -107,10 +107,18 @@ test("a silent service is reported as a timeout", async () => {
         });
       }),
   );
-  const result = await probeJevApiKey(KEY, { fetchImpl: fetch, timeoutMs: 20 });
-  assert.equal(result.ok, false);
-  assert.match(result.message, /did not answer/);
-  assert.ok(!result.message.includes(KEY));
+  // `AbortSignal.timeout` uses an unref'd timer, so a fixture whose only pending
+  // work is the never-settling fetch would drain the event loop before the
+  // abort. One live timer stands in for the socket a real request holds open.
+  const keepAlive = setInterval(() => {}, 5);
+  try {
+    const result = await probeJevApiKey(KEY, { fetchImpl: fetch, timeoutMs: 20 });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /did not answer/);
+    assert.ok(!result.message.includes(KEY));
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
 
 test("the default timeout is bounded", () => {

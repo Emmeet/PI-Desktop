@@ -13,7 +13,7 @@ export const rendererProbeUnavailable = process.platform === "linux" && !process
   : false;
 
 /** Production renderer modules in a fresh sandboxed Electron profile; only IPC is a fixture. */
-export async function runOmpRendererProbe(source, probe = "ompP2Probe", screenshotPath) {
+export async function runOmpRendererProbe(source, probe = "ompP2Probe", screenshotPath, { nativeInput = false } = {}) {
   const temp = await mkdtemp(join(tmpdir(), "omp-p2-renderer-"));
   try {
     await build({
@@ -41,13 +41,27 @@ export async function runOmpRendererProbe(source, probe = "ompP2Probe", screensh
     assert(css.length, "Build the production renderer before UI probes");
     await cp(join(renderer, "assets"), join(temp, "assets"), { recursive: true });
     await writeFile(join(temp, "index.html"), `<!doctype html><html data-platform="linux" data-theme="light"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:">${css.map((p) => `<link rel="stylesheet" href="${p}">`).join("")}</head><body><div id="root"></div><script type="module" src="renderer.js"></script></body></html>`);
+    if (nativeInput) {
+      await writeFile(join(temp, "preload.cjs"), `
+const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("rendererProbeInput", (events) => ipcRenderer.invoke("renderer-probe:input", events));`);
+    }
     await writeFile(join(temp, "main.cjs"), `
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 app.setPath("userData", path.join(__dirname, "profile"));
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 1100, height: 780, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  const win = new BrowserWindow({ show: ${nativeInput}, frame: ${!nativeInput}, width: 1100, height: 780, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, ${nativeInput ? 'preload: path.join(__dirname, "preload.cjs"),' : ""} } });
+  win.webContents.on("console-message", (event) => { if (event.level === "error") console.error(event.message); });
+  ${nativeInput ? `ipcMain.handle("renderer-probe:input", async (event, events) => {
+    if (event.sender !== win.webContents) throw Error("Unexpected probe sender");
+    for (const input of events) {
+      if (input.type === "text") await win.webContents.insertText(input.text);
+      else win.webContents.sendInputEvent(input);
+    }
+  });
+  win.focus();` : ""}
   try {
     await win.loadFile(path.join(__dirname, "index.html"));
     const result = await win.webContents.executeJavaScript(${JSON.stringify(`window.${probe}()`)});

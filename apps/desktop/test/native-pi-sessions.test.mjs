@@ -223,6 +223,7 @@ function forkHarness({ host, sidecar, activeTurns = new Map() }) {
     "node:fs": { mkdirSync() {} },
     "@pi-desktop/shared": sharedForIpc,
     "../importers": { convertSession() {}, scanAllSources() {}, scanModelConfigs() {} },
+    "../omp-capability-sync": { runOmpConfig() { assert.fail("fork must not change omp config"); } },
     "../services/session-collaboration": { readSessionCollaboration() {} },
     "../services/session-search": { searchSessionsAcrossSources },
   });

@@ -16,9 +16,9 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const APP_NAME = "PI-Desktop";
+const APP_NAME = "OMP-Desktop";
 const DEV_BUNDLE_ID = "io.github.emmeet.omp-desktop.dev";
-const BRANDING_SCHEMA = "v4";
+const BRANDING_SCHEMA = "v5";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DESKTOP_ROOT = join(ROOT, "apps", "desktop");
 

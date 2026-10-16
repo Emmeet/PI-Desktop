@@ -33,6 +33,7 @@ const { registerSessionIpc } = load("../electron/main/ipc/session-ipc.ts", {
   "node:path": path,
   "@pi-desktop/shared": shared,
   "../importers": {},
+  "../omp-capability-sync": { runOmpConfig() { assert.fail("collaboration must not change omp config"); } },
   "../services/session-collaboration": collaboration,
   "../services/session-search": { searchSessionsAcrossSources: async () => ({ hits: [], nextOffset: null }) },
 });

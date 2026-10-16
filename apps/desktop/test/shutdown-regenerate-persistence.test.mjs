@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { register, registerHooks } from "node:module";
 import { tmpdir } from "node:os";
@@ -20,7 +21,15 @@ registerHooks({
         app.quit = () => {};
         export const globalShortcut = { unregister() {} };`,
     };
-    return next(url, context);
+    try {
+      return next(url, context);
+    } catch (error) {
+      // Node 22.19 returns a null source for CommonJS dependencies once a
+      // register()-based resolve hook is chained with a load hook. Serve the
+      // bytes directly so the ESM loader keeps its CJS interop.
+      if (error?.code !== "ERR_INVALID_RETURN_PROPERTY_VALUE") throw error;
+      return { format: context.format ?? "commonjs", source: readFileSync(new URL(url), "utf8"), shortCircuit: true };
+    }
   },
 });
 register(new URL("./helpers/ts-import-hooks.mjs", import.meta.url));

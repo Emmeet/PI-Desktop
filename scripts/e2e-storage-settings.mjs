@@ -47,7 +47,7 @@ const { app, BrowserWindow } = require("electron");
 const path = require("node:path");
 app.setPath("userData", path.join(__dirname, "profile"));
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 1000, height: 720,
+  const win = new BrowserWindow({ show: true, width: 1000, height: 720,
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
   win.webContents.on("console-message", (event) => console.error(event.message));
   try {

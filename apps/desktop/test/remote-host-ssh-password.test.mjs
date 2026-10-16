@@ -179,6 +179,18 @@ test("a password target reaches ssh through the askpass helper and nowhere else"
 });
 
 test("a key-authenticated transport is handed no askpass material", { timeout: TEST_TIMEOUT_MS }, async (t) => {
+  // A key transport inherits the app's environment, so an ambient SSH_ASKPASS
+  // (this workstation exports one) would reach the child for reasons that have
+  // nothing to do with this transport. Scrub it so the assertion is about the
+  // transport's own env, which is what "no askpass material" claims.
+  const saved = process.env.SSH_ASKPASS;
+  const savedRequire = process.env.SSH_ASKPASS_REQUIRE;
+  delete process.env.SSH_ASKPASS;
+  delete process.env.SSH_ASKPASS_REQUIRE;
+  t.after(() => {
+    if (saved !== undefined) process.env.SSH_ASKPASS = saved;
+    if (savedRequire !== undefined) process.env.SSH_ASKPASS_REQUIRE = savedRequire;
+  });
   const binary = await writeFixture(t, FIXTURES.argvAndEnv, "ssh-no-askpass");
   const transport = createSystemSshTransport({ host: "remote.example" }, { binary });
   t.after(() => transport.dispose());

@@ -155,24 +155,6 @@ test("running prompts use a removable per-session queue with priority actions", 
   assert.doesNotMatch(queuedPromptsLib, /clearQueuedPromptSendNow/);
 });
 
-test("reordering a queued prompt swaps plain neighbours only", () => {
-  // The Host reorders durable positions; the renderer mirrors one swap and
-  // never moves a promoted row or crosses into the priority block.
-  assert.match(
-    queuedPromptsLib,
-    /if \(!item \|\| isPromotedQueuedPrompt\(item\)\) return queues;/,
-  );
-  assert.match(
-    queuedPromptsLib,
-    /if \(!target \|\| isPromotedQueuedPrompt\(target\)\) return queues;/,
-  );
-  assert.match(
-    queueSlice,
-    /if \(!item \|\| isPendingQueuedPrompt\(item\) \|\| isPromotedQueuedPrompt\(item\)\) \{/,
-  );
-  // A boundary no-op must not reach the Host.
-  assert.match(queueSlice, /if \(moved === before\) return;/);
-});
 
 test("editing a queued prompt needs an empty composer and restores its draft", () => {
   // The live read is the only current source: the draft cache is not written

@@ -166,7 +166,11 @@ fn normalize_model(value: Option<&str>) -> Result<Option<String>> {
     };
     // omp role reference (`@smol`, `@slow`, ...), resolved by omp at spawn time.
     if let Some(role) = trimmed.strip_prefix('@') {
-        if !role.is_empty() && role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        if !role.is_empty()
+            && role
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
             return Ok(Some(trimmed.to_string()));
         }
         bail!("SUBAGENT_INVALID: `model` role reference must look like @role");

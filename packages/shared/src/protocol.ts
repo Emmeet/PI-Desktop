@@ -2,7 +2,7 @@ export const PROTOCOL_VERSION = 11 as const;
 export const SCHEMA_VERSION = 16 as const;
 /** OMP Desktop fork: its own app id so it never collides with upstream PI-Desktop installs. */
 export const APP_ID = "io.github.emmeet.omp-desktop";
-export const APP_NAME = "PI-Desktop";
+export const APP_NAME = "OMP-Desktop";
 export const APP_VERSION = "0.18.0";
 
 export const APP_MENU_COMMANDS = [
