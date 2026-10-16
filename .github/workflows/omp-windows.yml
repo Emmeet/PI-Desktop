@@ -1,8 +1,12 @@
 name: OMP Windows (artifacts only)
 
-# This lane never runs on a push/tag and never creates a GitHub Release.
+# Runs on demand or on pushes to the OMP fork branch; never on tags and
+# never creates a GitHub Release (artifacts only).
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/omp-support]
+    paths-ignore: ['docs/**', '**/*.md']
 
 permissions:
   contents: read

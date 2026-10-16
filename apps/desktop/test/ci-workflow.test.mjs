@@ -450,9 +450,10 @@ test("the OMP Windows lane builds natively, verifies, and never publishes", asyn
     read("../../../README.md"),
     read("../../../NOTICE"),
   ]);
-  // Dispatch-only: no push or tag may ever start this lane.
+  // Dispatch or fork-branch pushes only; tags may never start this lane.
   assert.match(ompWindowsWorkflowSource, /^on:\n  workflow_dispatch:/m);
-  assert.doesNotMatch(ompWindowsWorkflowSource, /\n  push:/);
+  assert.match(ompWindowsWorkflowSource, /\n  push:\n    branches: \[feat\/omp-support\]/);
+  assert.doesNotMatch(ompWindowsWorkflowSource, /tags:/);
   assert.doesNotMatch(ompWindowsWorkflowSource, /\n  pull_request:/);
   assert.doesNotMatch(ompWindowsWorkflowSource, /release:|createRelease|softprops/);
   assert.match(ompWindowsWorkflowSource, /runs-on: windows-latest/);
