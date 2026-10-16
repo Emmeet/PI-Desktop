@@ -11,7 +11,13 @@ import { PLUGIN_RENDERER_SCHEME_PRIVILEGES } from "./plugin-renderer-protocol";
  * scheme registered first. Each protocol module owns its privileges; this is
  * the one place that registers them, together.
  */
+let registered = false;
+
 export function registerPluginSchemes(): void {
+  // entry.ts registers synchronously before async storage preparation (which
+  // may let Electron become ready); the composition root call is then a no-op.
+  if (registered) return;
+  registered = true;
   protocol.registerSchemesAsPrivileged([
     PLUGIN_ASSET_SCHEME_PRIVILEGES,
     PLUGIN_RENDERER_SCHEME_PRIVILEGES,
