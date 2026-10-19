@@ -38,43 +38,61 @@ export function createOmpNotificationStore(dataDir: string) {
     writeFileSync(tmp, JSON.stringify(rows.slice(0, KEEP)));
     renameSync(tmp, path);
   };
+  // Every mutation is a read-modify-write on one file. Two turns finishing in
+  // the same tick (subagents, loops, a scheduled run failing) would otherwise
+  // both load the same rows and the later save would drop the earlier one.
+  let queue: Promise<unknown> = Promise.resolve();
+  const mutate = <T>(operation: () => T): Promise<T> => {
+    const result = queue.then(operation);
+    queue = result.catch(() => undefined);
+    return result;
+  };
   return {
-    add(input: Omit<OmpNotification, "id" | "createdAt">): OmpNotification | null {
-      const rows = load();
-      if (rows.some((row) => row.turnId === input.turnId)) return null;
-      const row: OmpNotification = { ...input, id: `omp-${randomUUID()}`, createdAt: new Date().toISOString() };
-      save([row, ...rows]);
-      return row;
+    add(input: Omit<OmpNotification, "id" | "createdAt">): Promise<OmpNotification | null> {
+      return mutate(() => {
+        const rows = load();
+        if (rows.some((row) => row.turnId === input.turnId)) return null;
+        const row: OmpNotification = { ...input, id: `omp-${randomUUID()}`, createdAt: new Date().toISOString() };
+        save([row, ...rows]);
+        return row;
+      });
     },
     /** Merge omp rows into a host `notification.list` answer. */
     merge(
       host: { notifications?: Array<{ createdAt: string; readAt?: string }>; unreadCount?: number },
       input: { unreadOnly?: boolean; limit?: number },
     ) {
-      const own = load().filter((row) => !input.unreadOnly || !row.readAt);
-      const all = [...(host.notifications ?? []), ...own].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      // One read: the badge count must describe the rows that were delivered.
+      const own = load();
+      const unread = own.filter((row) => !row.readAt);
+      const listed = input.unreadOnly ? unread : own;
+      const all = [...(host.notifications ?? []), ...listed].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
       const limit = typeof input.limit === "number" && input.limit > 0 ? input.limit : all.length;
       return {
         ...host,
         notifications: all.slice(0, limit),
-        unreadCount: (host.unreadCount ?? 0) + load().filter((row) => !row.readAt).length,
+        unreadCount: (host.unreadCount ?? 0) + unread.length,
       };
     },
     owns: (id: string) => id.startsWith("omp-"),
-    markRead(id: string): boolean {
-      const rows = load();
-      const row = rows.find((candidate) => candidate.id === id);
-      if (!row) return false;
-      row.readAt ??= new Date().toISOString();
-      save(rows);
-      return true;
+    markRead(id: string): Promise<boolean> {
+      return mutate(() => {
+        const rows = load();
+        const row = rows.find((candidate) => candidate.id === id);
+        if (!row) return false;
+        row.readAt ??= new Date().toISOString();
+        save(rows);
+        return true;
+      });
     },
-    markAllRead() {
-      const now = new Date().toISOString();
-      save(load().map((row) => ({ ...row, readAt: row.readAt ?? now })));
+    markAllRead(): Promise<void> {
+      return mutate(() => {
+        const now = new Date().toISOString();
+        save(load().map((row) => ({ ...row, readAt: row.readAt ?? now })));
+      });
     },
-    clear() {
-      save([]);
+    clear(): Promise<void> {
+      return mutate(() => save([]));
     },
   };
 }

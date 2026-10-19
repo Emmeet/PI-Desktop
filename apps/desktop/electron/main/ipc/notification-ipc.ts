@@ -108,7 +108,7 @@ export function registerNotificationIpc({
     if (!host) throw new Error("host unavailable");
     const id = typeof input.id === "string" ? input.id.trim() : "";
     if (id && ompNotifications?.owns(id)) {
-      const ok = ompNotifications.markRead(id);
+      const ok = await ompNotifications.markRead(id);
       if (ok) dismissTaskNativeNotification(id);
       return { ok };
     }
@@ -121,7 +121,7 @@ export function registerNotificationIpc({
     const host = getHost();
     if (!host) throw new Error("host unavailable");
     const requestedAt = Date.now();
-    ompNotifications?.markAllRead();
+    await ompNotifications?.markAllRead();
     const result = await host.call<{ ok?: boolean }>("notification.markAllRead");
     if (result?.ok === false) return result;
     dismissedBefore = Math.max(dismissedBefore, requestedAt);
@@ -133,7 +133,7 @@ export function registerNotificationIpc({
     const host = getHost();
     if (!host) throw new Error("host unavailable");
     const requestedAt = Date.now();
-    ompNotifications?.clear();
+    await ompNotifications?.clear();
     const result = await host.call<{ ok?: boolean }>("notification.clear");
     if (result?.ok === false) return result;
     dismissedBefore = Math.max(dismissedBefore, requestedAt);

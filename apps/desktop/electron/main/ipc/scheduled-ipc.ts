@@ -88,7 +88,7 @@ export function registerScheduledIpc({
         .call("scheduled.finishRun", { runId: launch.runId, status: "error", errorCode: "SCHEDULE_DISPATCH_FAILED" })
         .catch(() => {});
       if (sessionId) ompNotificationHub.scheduledRuns.delete(sessionId);
-      const notification = ompNotificationHub.store?.add({
+      const notification = await ompNotificationHub.store?.add({
         kind: "task.failed",
         sessionId: sessionId ?? "",
         sessionTitle: task?.title || "Scheduled task",
