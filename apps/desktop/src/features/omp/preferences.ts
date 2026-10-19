@@ -1,9 +1,11 @@
+import type { OmpEvent } from "@pi-desktop/shared";
+
 export type OmpValues = Record<string, unknown>;
 
 export interface OmpPreferenceApi {
   ompConfigGet(): Promise<{ values: OmpValues }>;
   ompConfigSet(key: string, value: unknown): Promise<unknown>;
-  onOmpEvent(listener: (event: { method: string }) => void): () => void;
+  onOmpEvent(listener: (event: OmpEvent) => void): () => void;
 }
 
 /** Reads are deliberately not cached: the engine and other windows can edit config. */

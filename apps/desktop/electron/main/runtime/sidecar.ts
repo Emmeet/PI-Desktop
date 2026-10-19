@@ -215,7 +215,7 @@ export function createSidecarRuntime({
     } catch {
       /* untitled */
     }
-    const notification = store.add({
+    const notification = await store.add({
       kind: errorCode ? "task.failed" : "task.completed",
       sessionId,
       sessionTitle: title || "OMP",
@@ -250,7 +250,7 @@ export function createSidecarRuntime({
       if (params && typeof params === "object" && "sessionId" in params && typeof params.sessionId === "string") cancelOmpHostRequests(s, params.sessionId);
       return;
     }
-    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed" || method === "native.btw") {
+    if (method === "native.subagents.changed" || method === "native.login.ui" || method === "native.commands.changed" || method === "native.btw" || method === "native.loop" || method === "native.goal") {
       sendToRenderer(IPC.event.ompEvent, { method, params });
       return;
     }

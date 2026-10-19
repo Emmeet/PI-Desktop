@@ -469,3 +469,28 @@ export const IPC_WHITELIST = new Set<string>([
   ...Object.values(IPC.invoke),
   ...Object.values(IPC.event),
 ]);
+
+/**
+ * Engine → desktop side-channel events forwarded on `IPC.event.ompEvent`.
+ * `params` is engine data: validate before use, never trust its shape.
+ */
+export type OmpEvent =
+  | { method: "native.subagents.changed"; params: { sessionId: string; subagents: unknown } }
+  | { method: "native.login.ui"; params: Record<string, unknown> }
+  | { method: "native.commands.changed"; params: { sessionId: string } }
+  | { method: "native.btw"; params: { sessionId: string; frame: Record<string, unknown> } }
+  | { method: "native.loop"; params: { sessionId: string; loop: { prompt: string; total: number; done: number } | null } }
+  | { method: "native.goal"; params: { sessionId: string; frame: Record<string, unknown> } }
+  /** Main-process notice that an allow-listed omp setting changed. */
+  | { method: "omp.config.changed"; params: { key: string; value: unknown } };
+
+/** The `method` values the main process forwards on the omp event channel. */
+export const OMP_EVENT_METHODS: ReadonlySet<string> = new Set<OmpEvent["method"]>([
+  "native.subagents.changed",
+  "native.login.ui",
+  "native.commands.changed",
+  "native.btw",
+  "native.loop",
+  "native.goal",
+  "omp.config.changed",
+]);

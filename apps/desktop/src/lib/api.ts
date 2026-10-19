@@ -125,6 +125,7 @@ import type {
   TrustedExtensionUiPromptResponse,
   SessionTodoSnapshot,
   StorageInfo,
+  OmpEvent,
 } from "@pi-desktop/shared";
 import {
   defaultCommandShellForPlatform,
@@ -142,6 +143,7 @@ import {
   validateNetworkProxy,
   validateSpeechSettings,
   JEV_API_KEY_SECRET_REF,
+  OMP_EVENT_METHODS,
 } from "@pi-desktop/shared";
 
 export type ImportSource = "claude-code" | "opencode" | "codex" | "pi";
@@ -670,11 +672,14 @@ export const api = {
     invoke<{ result: T }>(IPC.invoke.ompCall, { method: "omp.session.command", params: { sessionId, command } }).then((reply) => reply.result),
   ompRevertEdit: (input: { path: string; oldText: string; newText: string }) =>
     invoke<{ ok: boolean; alreadyReverted?: boolean }>(IPC.invoke.ompRevertEdit, input),
-  onOmpEvent: (listener: (event: { method: string; params: any }) => void) => {
+  onOmpEvent: (listener: (event: OmpEvent) => void) => {
     if (!window.piDesktop?.on) return () => undefined;
-    return window.piDesktop.on(IPC.event.ompEvent, (payload) =>
-      listener(payload as { method: string; params: any }),
-    );
+    return window.piDesktop.on(IPC.event.ompEvent, (payload) => {
+      const event = payload as { method?: unknown };
+      // Unknown methods are engine data the main process did not forward.
+      if (typeof event?.method !== "string" || !OMP_EVENT_METHODS.has(event.method)) return;
+      listener(payload as OmpEvent);
+    });
   },
   ompSetThinking: (input: { sessionId?: string; level: string }) =>
     invoke<{ session: SessionSummary | null }>(IPC.invoke.ompThinkingSet, input),

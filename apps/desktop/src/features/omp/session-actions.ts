@@ -1,5 +1,7 @@
+import type { OmpEvent } from "@pi-desktop/shared";
+
 export type SessionCommand = <T>(sessionId: string, command: Record<string, unknown> & { type: string }) => Promise<T>;
-export type ActionEvent = { method: string; params: { sessionId?: string; frame?: Record<string, unknown> } };
+export type ActionEvent = OmpEvent;
 export type BtwTurn = { question: string; answer: string; status: string; error?: string };
 export type BtwRecord = BtwTurn & { id: string; followUps?: BtwTurn[] };
 export type BtwState = { records: BtwRecord[]; selectedId?: string; pending?: BtwTurn; loading: boolean; busy: boolean; error: unknown | null };
@@ -59,13 +61,14 @@ export class BtwActions {
   event = (event: ActionEvent): void => {
     if (this.disposed || event.method !== "native.btw" || event.params.sessionId !== this.sessionId || !this.state.busy) return;
     const frame = event.params.frame;
-    if (frame?.type === "btw_record") {
+    if (!frame || typeof frame !== "object" || !("type" in frame)) return;
+    if (frame.type === "btw_record") {
       const record = frame.record as BtwRecord;
       if (!record?.id || (this.streamId && record.id !== this.streamId) || (record.followUps?.at(-1) ?? record).question !== this.question) return;
       this.streamId = record.id;
       this.streamStarted = true;
       this.save(record);
-    } else if (frame?.type === "btw_delta" && this.streamStarted && frame.recordId === this.streamId && typeof frame.delta === "string") {
+    } else if (frame.type === "btw_delta" && this.streamStarted && frame.recordId === this.streamId && typeof frame.delta === "string") {
       const record = this.state.records.find((entry) => entry.id === this.streamId);
       if (!record || (record.followUps?.at(-1) ?? record).status !== "running") return;
       const delta = frame.delta;
@@ -164,9 +167,14 @@ export class GoalActions {
     this.listeners.forEach((listener) => listener());
   }
   event = (event: ActionEvent): void => {
-    if (event.method !== "native.goal" || event.params.sessionId !== this.sessionId || event.params.frame?.type !== "goal_updated") return;
+    if (event.method !== "native.goal" || event.params.sessionId !== this.sessionId) return;
+    const frame = event.params.frame;
+    if (!frame || typeof frame !== "object" || !("goal" in frame)) return;
+    const goal = frame.goal;
+    // `goal: null` is a real update (the goal was dropped/completed elsewhere).
+    if (goal !== null && (!goal || typeof goal !== "object" || !("objective" in goal) || typeof goal.objective !== "string")) return;
     this.revision++;
-    this.update({ goal: event.params.frame.goal as Goal | null });
+    this.update({ goal: goal as Goal | null });
   };
   async run(op: GoalOp, extra: { objective?: string; token_budget?: number } = {}): Promise<void> {
     if (this.disposed || this.state.busy) return;

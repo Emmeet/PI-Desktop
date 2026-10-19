@@ -21,6 +21,7 @@ import {
   COMPACTION_SUMMARY_RETRY_BUDGET_MS,
   STREAM_IDLE_TIMEOUT_MS,
   rpcTimeoutMs,
+  OMP_EVENT_METHODS,
   type PlanExecution,
   type PlanArtifact,
   type PlanResolveRequest,
@@ -284,5 +285,26 @@ describe("Plan protocol contracts", () => {
       CONFIG_SYNC_RPC_TIMEOUT_MS,
     );
     expect(rpcTimeoutMs("configSync.getState", {})).toBe(130_000);
+  });
+});
+
+describe("omp side-channel events", () => {
+  it("names every event the engine emits so the main process can forward them", () => {
+    // The engine's `side()` methods are the producers; the main process
+    // forwards exactly OMP_EVENT_METHODS to the renderer. A new side-channel
+    // event that is not forwarded is silently dead (the renderer's listener
+    // never fires), so the set is asserted here.
+    for (const method of [
+      "native.subagents.changed",
+      "native.login.ui",
+      "native.commands.changed",
+      "native.btw",
+      "native.loop",
+      "native.goal",
+      "omp.config.changed",
+    ]) {
+      expect(OMP_EVENT_METHODS.has(method)).toBe(true);
+    }
+    expect(OMP_EVENT_METHODS.size).toBe(7);
   });
 });
