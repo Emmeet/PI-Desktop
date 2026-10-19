@@ -126,7 +126,7 @@ export function OmpRolePicker({
     >
       <div className="composer-menu-root">
         <div className="composer-model-list">
-          {!roles && !error ? <div className="composer-model-empty">Loading omp roles…</div> : null}
+          {!roles && !error ? <div className="composer-model-empty">{t("chat.ompRolesLoading")}</div> : null}
           {error ? <div className="composer-model-empty">{error}</div> : null}
           {assigned.map((role) => {
             const active = matched?.id === role.id;

@@ -102,7 +102,7 @@ export function OmpModelPicker({
     : draftModel ?? catalog?.selected ?? null;
   const thinkingLevel = (session ? session.thinkingLevel : draftThinking ?? catalog?.thinkingLevel) ?? "off";
   const selectedInfo = catalog?.models.find((model) => model.provider === selected?.provider && model.id === selected?.modelId);
-  const modelLabel = selectedInfo?.name ?? selected?.modelId ?? (catalog ? "omp default" : "Model");
+  const modelLabel = selectedInfo?.name ?? selected?.modelId ?? (catalog ? t("chat.ompDefaultModel") : t("chat.model"));
 
   const groups = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -287,16 +287,16 @@ export function OmpModelPicker({
           />
         </label>
         <div className="composer-model-list" data-omp-model-list="true">
-          {!catalog && !loadError ? <div className="composer-model-empty">Loading omp models…</div> : null}
+          {!catalog && !loadError ? <div className="composer-model-empty">{t("chat.ompModelsLoading")}</div> : null}
           {loadError ? (
             <div className="composer-model-empty">
               {loadError}{" "}
-              <button type="button" className="composer-menu-entry" onClick={() => refresh(true)}>Retry</button>
+              <button type="button" className="composer-menu-entry" onClick={() => refresh(true)}>{t("chat.ompRetry")}</button>
             </div>
           ) : null}
           {catalog && groups.length === 0 ? (
             <div className="composer-model-empty">
-              {query ? t("chat.noModelResults") : "omp reports no usable models. Configure one with `omp` (/login or ~/.omp/agent/models.yml)."}
+              {query ? t("chat.noModelResults") : t("chat.ompNoModels")}
             </div>
           ) : null}
           {groups.map(([provider, models]) => (
