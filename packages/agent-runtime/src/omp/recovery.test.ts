@@ -55,13 +55,24 @@ process.stdin.on("data", (chunk) => {
   buffer += chunk; let end;
   while ((end = buffer.indexOf("\n")) >= 0) {
     const cmd = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
-    log({ type: "command", command: cmd.type, message: cmd.message });
+    log({ type: "command", command: cmd.type, message: cmd.message, images: cmd.images });
     if (cmd.type === "get_state") reply(cmd, { sessionFile: file, sessionId: "stable-engine-session", isSettled: !active, isStreaming: !!active });
     else if (cmd.type === "get_available_models") reply(cmd, { models: [] });
     else if (cmd.type === "prompt") { reply(cmd); deliver(cmd); }
     else if (cmd.type === "steer" || cmd.type === "follow_up") {
       if (cmd.message === "uncertain") { log({ type: "possibly-delivered", message: cmd.message }); process.exit(32); }
       (cmd.type === "steer" ? steering : followUp).push(cmd); queues(); reply(cmd);
+    }
+    else if (cmd.type === "remove_queued_message") {
+      const queue = cmd.queue === "steering" ? steering : followUp;
+      const index = queue.findIndex((entry) => entry.message === cmd.message);
+      if (index >= 0) queue.splice(index, 1);
+      queues(); reply(cmd);
+    }
+    else if (cmd.type === "promote_queued_message") {
+      const index = followUp.findIndex((entry) => entry.message === cmd.message);
+      if (index >= 0) steering.push(followUp.splice(index, 1)[0]);
+      queues(); reply(cmd);
     }
     else if (cmd.type === "btw" && cmd.question === "fixture_crash") { reply(cmd); setImmediate(() => process.exit(33)); }
     else if (cmd.type === "btw" && cmd.question === "fixture_finish") { finish(); reply(cmd); }
@@ -78,7 +89,7 @@ process.stdin.on("end", () => process.exit(0));
 `;
 
 type Recovery = { state: "retrying" | "connected" | "failed"; attempt: number; delayMs?: number };
-type Log = { type: string; pid: number; argv?: string[]; message?: string; command?: string; file?: string };
+type Log = { type: string; pid: number; argv?: string[]; message?: string; command?: string; file?: string; images?: Array<{ type: string; data: string; mimeType: string }> };
 type Harness = {
   root: string;
   service: OmpSessionService;
@@ -147,6 +158,34 @@ async function crash(harness: Harness) {
 }
 
 describe("OMP automatic external process recovery", () => {
+  it.each(["remove", "promote"] as const)("scopes queue %s to the owning session when message text matches", async (operation) => {
+    const h = setup(); await initial(h);
+    const otherId = h.service.create({ projectPath: h.root }).id;
+    await h.service.prompt(otherId, "other active", h.notify);
+    const first = (await h.service.followUp(h.id, "identical")).entry;
+    const second = (await h.service.followUp(otherId, "identical")).entry;
+    if (operation === "remove") await h.service.queueRemove(second.id);
+    else await h.service.queuePromote(second.id);
+    expect(h.service.queueList(h.id)).toEqual([expect.objectContaining({ id: first.id, content: "identical" })]);
+    const otherQueue = h.service.queueList(otherId);
+    if (operation === "remove") expect(otherQueue).toEqual([]);
+    else expect(otherQueue).toEqual([expect.objectContaining({ content: "identical", id: expect.not.stringMatching(/followUp/) })]);
+    expect(first.id).not.toBe(second.id);
+  });
+
+  it("preserves queued follow-up images through reconnect", async () => {
+    const h = setup(); await initial(h);
+    const image = join(h.root, "attached.png");
+    writeFileSync(image, Buffer.from("image fixture"));
+    await h.service.followUp(h.id, "image follow-up", [{ path: image, kind: "image", mimeType: "image/png" }]);
+    const expected = [{ type: "image", data: Buffer.from("image fixture").toString("base64"), mimeType: "image/png" }];
+    expect(h.logs().find((entry) => entry.type === "command" && entry.command === "follow_up" && entry.message === "image follow-up")?.images).toEqual(expected);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }); await crash(h);
+    await vi.advanceTimersByTimeAsync(250);
+    await h.until(() => h.recoveries.at(-1)?.state === "connected");
+    expect(h.logs().find((entry) => entry.type === "command" && entry.command === "prompt" && entry.message === "image follow-up")?.images).toEqual(expected);
+  });
+
   it("resumes the same session, preserves inserted messages once/in order, and does not replay the interrupted prompt", async () => {
     const h = setup(); await initial(h);
     await h.service.steer(h.id, "one"); await h.service.followUp(h.id, "two");

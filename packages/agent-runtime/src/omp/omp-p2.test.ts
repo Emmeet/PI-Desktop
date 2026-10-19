@@ -58,6 +58,7 @@ const handle = (cmd) => {
   }
   else if (cmd.type === "predict_word") reply(cmd, { suffix: "tion" });
   else if (cmd.type === "predict_word_feedback") reply(cmd);
+  else if (cmd.type === "get_subagent_messages") reply(cmd, {});
   else if (cmd.type === "goal") {
     goal = cmd.op === "drop" ? null : cmd.op === "create" ? { goal: { objective: cmd.objective, status: "active" }, enabled: true } : goal;
     if (goal && cmd.op === "pause") goal = { ...goal, enabled: false, goal: { ...goal.goal, status: "paused" } };
@@ -110,7 +111,12 @@ const handle = (cmd) => {
       out({ type: "subagent_lifecycle", payload: { id: "orphan", agent: "task", index: 0, status: "aborted" } });
       out({ type: "subagent_lifecycle", payload: { id: "root-stub", agent: "task", index: 0, status: "started" } });
       out({ type: "subagent_lifecycle", payload: { id: "root-stub", agent: "task", index: 0, status: "aborted" } });
-      out({ type: "subagent_lifecycle", payload: { id: "real", agent: "scout", parentToolCallId: "root-tool", index: 0, status: "started" } });
+      const subagentFile = path.join(cwd, "subagent.jsonl");
+      fs.writeFileSync(subagentFile, [
+        { type: "session", id: "subagent", timestamp: new Date().toISOString(), cwd },
+        { type: "message", id: "subagent-message", parentId: null, timestamp: new Date().toISOString(), message: { role: "assistant", content: "Owned subagent transcript" } },
+      ].map(JSON.stringify).join("\n") + "\n");
+      out({ type: "subagent_lifecycle", payload: { id: "real", agent: "scout", parentToolCallId: "root-tool", index: 0, status: "started", sessionFile: subagentFile } });
       out({ type: "subagent_progress", payload: { agent: "scout", parentToolCallId: "root-tool", index: 0, task: "Inspect", progress: { id: "real", toolCount: 2, tokens: 15, status: "running" } } });
       out({ type: "tool_execution_start", toolCallId: "root-tool", toolName: "task", args: {} });
       out({ type: "subagent_lifecycle", payload: { id: "nested", agent: "task", parentToolCallId: "nested-tool", index: 0, status: "started" } });
@@ -276,6 +282,20 @@ describe("OMP P2 public service user paths", () => {
     expect(service.subagents(id)[1]).toMatchObject({ status: "aborted" });
   });
 
+  it("authorizes subagent transcript paths against engine-owned identities", async () => {
+    const { service, id, root } = setup();
+    await runPrompt(service, id, "subagents");
+    const known = service.subagents(id).find((agent) => agent.id === "real")!.sessionFile!;
+    expect(await service.subagentMessages(id, "real", known)).toEqual([expect.objectContaining({ content: "Owned subagent transcript" })]);
+    expect(await service.subagentMessages(id, "real")).toEqual([expect.objectContaining({ content: "Owned subagent transcript" })]);
+    const unrelated = join(root, "unrelated.jsonl");
+    writeFileSync(unrelated, readFileSync(known));
+    const before = calls(root).filter((call) => call.type === "get_subagent_messages").length;
+    await expect(service.subagentMessages(id, "real", unrelated)).rejects.toMatchObject({ errorCode: "PERMISSION_DENIED" });
+    await expect(service.subagentMessages(id, "unknown", known)).rejects.toMatchObject({ errorCode: "PERMISSION_DENIED" });
+    expect(calls(root).filter((call) => call.type === "get_subagent_messages")).toHaveLength(before);
+  });
+
   it("waits for settlement and runs exactly the requested server-owned loop count without renderer involvement", async () => {
     const sides: ObservedSide[] = [];
     const { service, id, root } = setup(observeSide(sides));
@@ -327,6 +347,50 @@ describe("OMP P2 public service user paths", () => {
     expect(service.status(id).status.isRunning).toBe(false);
     await runPrompt(service, id, "normal");
     expect(service.detail(id)?.messages.map((message) => message.content)).toEqual(["normal", "Completed"]);
+  });
+
+  it.each(["frame", "transport"] as const)("never swallows a %s prompt failure when the turn finalizes immediately", async (kind) => {
+    const { service, id } = setup();
+    await runPrompt(service, id, "normal");
+    type Runtime = { refreshSessionFile: () => Promise<void>; rpc: { request: (command: { type: string }) => Promise<unknown> } };
+    const runtime = (service as unknown as { runtimes: Map<string, Runtime> }).runtimes.get(id)!;
+    // Fastest possible settlement: the turn is finalized in the same microtask
+    // burst as the rejection, before the service's catch handler runs.
+    runtime.refreshSessionFile = () => Promise.resolve();
+    if (kind === "transport") {
+      const request = runtime.rpc.request.bind(runtime.rpc);
+      runtime.rpc.request = (command) => command.type === "prompt" ? Promise.reject(new Error("transport broke")) : request(command);
+    }
+    const events: AgentEventEnvelope[] = [];
+    const { turnId } = await service.prompt(id, kind === "frame" ? "reject" : "anything", (event) => { events.push(event); }, "optimistic-fast");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const errors = events.filter((event) => event.event.type === "error");
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    for (const error of errors) expect(error).toMatchObject({ sessionId: id, turnId });
+    expect(errors.some((error) => JSON.stringify(error.event).includes(kind === "frame" ? "prompt setup rejected" : "transport broke"))).toBe(true);
+    expect(service.status(id).status.isRunning).toBe(false);
+  });
+
+  it("keeps resolving an optimistic message id every time it is used (fork, edit, regenerate)", async () => {
+    const { service, id } = setup();
+    await runPrompt(service, id, "normal");
+    type Internals = { records: Map<string, unknown>; resolveEntryId(record: unknown, messageId: string): string; aliases: Map<string, string>; setAlias(shown: string, engine: string): void };
+    const internals = service as unknown as Internals;
+    const record = internals.records.get(id);
+    // The transcript keeps showing the optimistic id; the first action must not use it up.
+    const engineId = internals.resolveEntryId(record, "optimistic-normal");
+    expect(engineId).not.toBe("optimistic-normal");
+    expect(internals.resolveEntryId(record, "optimistic-normal")).toBe(engineId);
+    expect(internals.resolveEntryId(record, "optimistic-normal")).toBe(engineId);
+  });
+
+  it("bounds the alias map, dropping the oldest mapping first", () => {
+    const { service } = setup();
+    const internals = service as unknown as { aliases: Map<string, string>; setAlias(shown: string, engine: string): void };
+    for (let index = 0; index < 2100; index++) internals.setAlias(`shown-${index}`, `engine-${index}`);
+    expect(internals.aliases.size).toBe(2000);
+    expect(internals.aliases.has("shown-0")).toBe(false);
+    expect(internals.aliases.get("shown-2099")).toBe("engine-2099");
   });
 
   it("makes registration and output persistence failures observable without silently dropping live output", async () => {

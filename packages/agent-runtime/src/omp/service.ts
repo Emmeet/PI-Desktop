@@ -70,6 +70,10 @@ export type OmpTreeNode = {
 export type OmpPromptAttachment = { path: string; name?: string; kind: "image" | "file"; mimeType?: string };
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+/** Subagent dock rows retained per runtime; older ones drop off the end. */
+const MAX_SUBAGENT_ROWS = 200;
+/** Shown-id → engine-entry aliases kept for edit/regenerate/fork (oldest dropped first). */
+const MAX_MESSAGE_ALIASES = 2000;
 const IMAGE_MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
 };
@@ -131,15 +135,15 @@ export function ompPhasesToTodos(phases: unknown): SessionTodo[] {
   return todos;
 }
 
-/** Stable queue entry id: the queue kind plus the message text. */
-export function ompQueueEntryId(queue: "steering" | "followUp", message: string): string {
-  return `ompq:${queue}:${Buffer.from(message, "utf8").toString("base64url")}`;
+/** Queue identities include their owner so equal text cannot target another chat. */
+export function ompQueueEntryId(sessionId: string, queue: "steering" | "followUp", message: string): string {
+  return `ompq:${queue}:${Buffer.from(sessionId, "utf8").toString("base64url")}:${Buffer.from(message, "utf8").toString("base64url")}`;
 }
 
-export function parseOmpQueueEntryId(id: string): { queue: "steering" | "followUp"; message: string } | undefined {
-  const match = /^ompq:(steering|followUp):(.*)$/.exec(id);
+export function parseOmpQueueEntryId(id: string): { sessionId: string; queue: "steering" | "followUp"; message: string } | undefined {
+  const match = /^ompq:(steering|followUp):([A-Za-z0-9_-]+):([A-Za-z0-9_-]*)$/.exec(id);
   if (!match) return undefined;
-  return { queue: match[1] as "steering" | "followUp", message: Buffer.from(match[2]!, "base64url").toString("utf8") };
+  return { sessionId: Buffer.from(match[2]!, "base64url").toString("utf8"), queue: match[1] as "steering" | "followUp", message: Buffer.from(match[3]!, "base64url").toString("utf8") };
 }
 
 type PendingUi = {
@@ -394,7 +398,7 @@ class OmpSessionRuntime {
   }
 
   private captureQueue(): void {
-    const queued = (["steering", "followUp"] as const).flatMap((queue) => this.queue[queue].map((message) => ({ queue, message, images: this.queuedImages.get(ompQueueEntryId(queue, message)) })));
+    const queued = (["steering", "followUp"] as const).flatMap((queue) => this.queue[queue].map((message) => ({ queue, message, images: this.queuedImages.get(ompQueueEntryId(this.id, queue, message)) })));
     this.recoveryQueue.unshift(...queued);
     this.queue = { steering: [], followUp: [] };
     this.publishQueue();
@@ -590,6 +594,19 @@ class OmpSessionRuntime {
     this.notify = notify;
   }
 
+  /** Report a failure for `turnId`, but only while that turn is still the live one. */
+  reportTurnFailure(turnId: string, error: unknown): void {
+    if (this.turnId !== turnId) return;
+    this.emit({
+      type: "error",
+      error: {
+        code: error && typeof error === "object" && "errorCode" in error && typeof error.errorCode === "string" ? error.errorCode : "OMP_RUNTIME_ERROR",
+        message: error instanceof Error ? error.message : String(error),
+        retriable: false,
+      },
+    });
+  }
+
   async prompt(content: string, turnId: string, userMessageId?: string, images: unknown[] = []): Promise<void> {
     if (this.isRunning) throw Object.assign(new Error("session already has an active turn"), { errorCode: "AGENT_BUSY" });
     this.turnId = turnId;
@@ -714,13 +731,13 @@ class OmpSessionRuntime {
   }
 
   /** Queue a message omp sends after the current run finishes. */
-  async followUp(content: string): Promise<void> {
+  async followUp(content: string, images: unknown[] = []): Promise<void> {
     if (!this.canQueue) throw Object.assign(new Error("No active turn"), { errorCode: "TURN_NOT_FOUND" });
-    await this.insert({ queue: "followUp", message: content });
+    await this.insert({ queue: "followUp", message: content, images });
   }
 
   private insert(entry: QueuedInsertion): Promise<void> {
-    if (entry.images?.length) this.queuedImages.set(ompQueueEntryId(entry.queue, entry.message), entry.images);
+    if (entry.images?.length) this.queuedImages.set(ompQueueEntryId(this.id, entry.queue, entry.message), entry.images);
     const operation = this.insertionTail.then(async () => {
       if (this.disposed) throw Object.assign(new Error("OMP session was disposed"), { errorCode: "OMP_PROCESS_EXITED" });
       if (this.recovery || this.recoveryError || !this.rpc.isAlive) {
@@ -749,7 +766,7 @@ class OmpSessionRuntime {
       const queued: QueuedInsertion[] = [...this.queue[queue].map((message) => ({ queue, message })), ...this.recoveryQueue.filter((entry) => entry.queue === queue)];
       for (const entry of queued) {
         if (!entry.deliveryStatus && queue === "steering" && this.pendingSteers.some((steer) => steer.text === entry.message)) continue;
-        entries.push({ id: ompQueueEntryId(queue, entry.message), sessionId: this.id, content: entry.message, position: entries.length, createdAt, ...(entry.deliveryStatus ? { deliveryStatus: entry.deliveryStatus } : {}) });
+        entries.push({ id: ompQueueEntryId(this.id, queue, entry.message), sessionId: this.id, content: entry.message, position: entries.length, createdAt, ...(entry.deliveryStatus ? { deliveryStatus: entry.deliveryStatus } : {}) });
       }
     }
     return entries;
@@ -757,7 +774,7 @@ class OmpSessionRuntime {
 
   async removeQueued(entryId: string): Promise<void> {
     const entry = parseOmpQueueEntryId(entryId);
-    if (!entry) return;
+    if (!entry || entry.sessionId !== this.id) return;
     const local = this.recoveryQueue.findIndex((item) => item.queue === entry.queue && item.message === entry.message);
     if (local >= 0) {
       this.recoveryQueue.splice(local, 1);
@@ -769,7 +786,7 @@ class OmpSessionRuntime {
 
   async promoteQueued(entryId: string): Promise<void> {
     const entry = parseOmpQueueEntryId(entryId);
-    if (!entry || entry.queue !== "followUp") return;
+    if (!entry || entry.sessionId !== this.id || entry.queue !== "followUp") return;
     const local = this.recoveryQueue.findIndex((item) => item.queue === "followUp" && item.message === entry.message);
     if (local >= 0) {
       this.recoveryQueue[local]!.queue = "steering";
@@ -842,6 +859,12 @@ class OmpSessionRuntime {
       updatedAt: Date.now(),
     } as OmpSubagentView;
     this.subagents.set(id, next);
+    // A loop of prompts spawns one row per prompt; keep the dock bounded.
+    while (this.subagents.size > MAX_SUBAGENT_ROWS) {
+      const oldest = [...this.subagents.values()].sort((left, right) => left.updatedAt - right.updatedAt)[0];
+      if (!oldest || oldest.id === id) break;
+      this.subagents.delete(oldest.id);
+    }
     this.side("native.subagents.changed", { sessionId: this.id, subagents: this.subagentList() });
   }
 
@@ -1090,6 +1113,9 @@ class OmpSessionRuntime {
     this.clearPendingUi();
     this.openTools.clear();
     this.pendingSubagents.clear();
+    // Tool arguments belong to the live turn's approvals and tool rows; keeping
+    // them for the runtime's life grows without bound on long sessions.
+    this.toolArgs.clear();
     this.pendingSteers.length = 0;
     this.turnId = undefined;
     this.userMessageId = undefined;
@@ -1272,8 +1298,8 @@ class OmpSessionRuntime {
         const id = typeof frame.messageId === "string" ? frame.messageId : randomUUID();
         if (message?.role === "user") {
           const originalText = textOf(message.content).text;
-          this.queuedImages.delete(ompQueueEntryId("steering", originalText));
-          this.queuedImages.delete(ompQueueEntryId("followUp", originalText));
+          this.queuedImages.delete(ompQueueEntryId(this.id, "steering", originalText));
+          this.queuedImages.delete(ompQueueEntryId(this.id, "followUp", originalText));
           const text = textOf(message.content).text.trim();
           const steerIndex = this.userMessageId ? -1 : this.pendingSteers.findIndex((steer) => steer.text.trim() === text);
           const steer = steerIndex >= 0 ? this.pendingSteers.splice(steerIndex, 1)[0] : undefined;
@@ -1490,7 +1516,20 @@ export class OmpSessionService {
     }
   }
 
+  /** Remember a shown id → engine id mapping; bounded so long-lived services do not grow without limit. */
+  private setAlias(shown: string, engine: string): void {
+    this.aliases.delete(shown);
+    this.aliases.set(shown, engine);
+    while (this.aliases.size > MAX_MESSAGE_ALIASES) {
+      const oldest = this.aliases.keys().next().value;
+      if (oldest === undefined) break;
+      this.aliases.delete(oldest);
+    }
+  }
+
   private resolveEntryId(record: SessionRecord, messageId: string): string {
+    // An alias stays valid for as long as the transcript can show its id: fork,
+    // edit and regenerate may each target the same shown message repeatedly.
     const aliased = this.aliases.get(messageId);
     if (aliased) return aliased;
     const file = this.readFile(record);
@@ -1929,20 +1968,14 @@ export class OmpSessionService {
       const keys = [optimistic, options.truncateFromMessageId].filter((key): key is string => Boolean(key));
       if (keys.length === 0) return;
       const last = lastEngineUserMessage(this.readFile(record)?.messages);
-      if (last) for (const key of keys) this.aliases.set(key, last.id);
+      if (last) for (const key of keys) this.setAlias(key, last.id);
     };
     if (branchEntry) await runtime.branchBefore(branchEntry);
     const turnId = randomUUID();
-    void runtime.prompt(prepared.message, turnId, userMessageId, prepared.images).catch((error) => {
-      notify({
-        sessionId: id,
-        turnId,
-        ts: Date.now(),
-        event: {
-          type: "error",
-          error: { code: (error as any)?.errorCode ?? "OMP_RUNTIME_ERROR", message: error instanceof Error ? error.message : String(error), retriable: false },
-        },
-      });
+    void runtime.prompt(prepared.message, turnId, userMessageId, prepared.images).catch((error: unknown) => {
+      // Only the window that owns this turn sees its failure: another window
+      // may have replaced the runtime's notifier while the prompt was in flight.
+      runtime.reportTurnFailure(turnId, error);
     });
     return { accepted: true, turnId };
   }
@@ -1984,9 +2017,9 @@ export class OmpSessionService {
 
   async followUp(id: string, content: string, attachments: OmpPromptAttachment[] = []): Promise<{ entry: QueuedTurnSummary }> {
     const runtime = this.liveRuntime(id);
-    const message = prepareOmpPrompt(content, attachments).message;
-    await runtime.followUp(message);
-    const entryId = ompQueueEntryId("followUp", message);
+    const { message, images } = prepareOmpPrompt(content, attachments);
+    await runtime.followUp(message, images);
+    const entryId = ompQueueEntryId(id, "followUp", message);
     const entries = runtime.queueEntries();
     return {
       entry: entries.find((entry) => entry.id === entryId) ?? {
@@ -2000,10 +2033,8 @@ export class OmpSessionService {
   }
 
   private queueOwner(entryId: string): OmpSessionRuntime | undefined {
-    for (const runtime of this.runtimes.values()) {
-      if (runtime.queueEntries().some((entry) => entry.id === entryId)) return runtime;
-    }
-    return undefined;
+    const entry = parseOmpQueueEntryId(entryId);
+    return entry ? this.runtimes.get(entry.sessionId) : undefined;
   }
 
   async queueRemove(entryId: string): Promise<void> {
@@ -2058,15 +2089,14 @@ export class OmpSessionService {
     }
     const record = this.records.get(id);
     if (!record?.path || !existsSync(record.path)) return [];
+    // Reuse the single parsed file: a second read plus per-line JSON.parse
+    // stalls the sidecar on a long session.
+    const file = this.readFile(record);
     let phases: unknown = [];
-    for (const line of readFileSync(record.path, "utf8").split("\n")) {
-      if (!line.includes('"todo"')) continue;
-      try {
-        const message = JSON.parse(line)?.message;
-        if (message?.role === "toolResult" && message.toolName === "todo" && !message.isError && Array.isArray(message.details?.phases)) {
-          phases = message.details.phases;
-        }
-      } catch { /* partial line */ }
+    for (const message of file?.messages ?? []) {
+      if (message.role !== "tool" || message.toolName !== "todo" || message.isError) continue;
+      const details = message.toolResult as { phases?: unknown } | undefined;
+      if (Array.isArray(details?.phases)) phases = details.phases;
     }
     return ompPhasesToTodos(phases);
   }
@@ -2113,12 +2143,20 @@ export class OmpSessionService {
   /** A subagent's own transcript: live from omp, else from its session file. */
   async subagentMessages(id: string, subagentId: string, sessionFile?: string): Promise<UiMessage[]> {
     const runtime = this.runtimes.get(id);
-    let raw: any[] | undefined;
+    const known = runtime?.subagentList().find((agent) => agent.id === subagentId)?.sessionFile;
+    if (sessionFile !== undefined) {
+      let matches = false;
+      if (known) {
+        try { matches = realpathSync(sessionFile) === realpathSync(known); } catch { /* Unresolvable paths grant no access. */ }
+      }
+      if (!matches) throw Object.assign(new Error("This transcript does not belong to the selected subagent"), { errorCode: "PERMISSION_DENIED" });
+    }
+    let raw: unknown[] | undefined;
     if (runtime?.alive) {
       const result = await runtime
-        .request<{ messages?: any[] }>({ type: "get_subagent_messages", subagentId, ...(sessionFile ? { sessionFile } : {}) })
+        .request<{ messages?: unknown }>({ type: "get_subagent_messages", subagentId, ...(sessionFile ? { sessionFile: known } : {}) })
         .catch(() => undefined);
-      raw = result?.messages;
+      raw = Array.isArray(result?.messages) ? result.messages : undefined;
     }
     if (raw) {
       const args = new Map<string, unknown>();
@@ -2127,8 +2165,7 @@ export class OmpSessionService {
         return projected ? [projected] : [];
       });
     }
-    const known = runtime?.subagentList().find((agent) => agent.id === subagentId)?.sessionFile;
-    const file = sessionFile ?? known;
+    const file = known;
     if (!file || !existsSync(file)) {
       throw Object.assign(new Error("This subagent's transcript is not available"), { errorCode: "NOT_FOUND" });
     }

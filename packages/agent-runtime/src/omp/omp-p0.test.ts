@@ -21,10 +21,10 @@ describe("omp todo projection", () => {
 });
 
 describe("omp queue ids", () => {
-  it("round-trips the queue kind and message text", () => {
-    const id = ompQueueEntryId("followUp", "hello: 世界\nline");
+  it("round-trips the owning session, queue kind and message text", () => {
+    const id = ompQueueEntryId("native-pi:session:世界", "followUp", "hello: 世界\nline");
     expect(id.startsWith("ompq:followUp:")).toBe(true);
-    expect(parseOmpQueueEntryId(id)).toEqual({ queue: "followUp", message: "hello: 世界\nline" });
+    expect(parseOmpQueueEntryId(id)).toEqual({ sessionId: "native-pi:session:世界", queue: "followUp", message: "hello: 世界\nline" });
     expect(parseOmpQueueEntryId("turn-1")).toBeUndefined();
   });
 });
