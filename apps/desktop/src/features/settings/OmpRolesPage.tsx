@@ -10,15 +10,15 @@ import { SettingsCard, SettingsRow } from "./primitives";
 
 type Model = { provider: string; id: string; name: string };
 
-function ModelSelect({ value: full, models, onChange, testId }: { value: string; models: Model[]; onChange: (v: string) => void; testId: string }) {
+function ModelSelect({ value: full, models, onChange, testId, disabled }: { value: string; models: Model[]; onChange: (v: string) => void; testId: string; disabled?: boolean }) {
   const { t } = useTranslation();
   // Keep a role's ":thinking" suffix when only the model changes.
   const { model: value, thinking } = splitRoleModel(full);
   const known = models.some((m) => `${m.provider}/${m.id}` === value);
   return (
     <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-    <select className="settings-select" data-omp-role-model={testId} value={value} onChange={(e) => onChange(e.target.value && thinking ? `${e.target.value}:${thinking}` : e.target.value)}>
-      <option value="">(not set)</option>
+    <select className="settings-select" disabled={disabled} data-omp-role-model={testId} value={value} onChange={(e) => onChange(e.target.value && thinking ? `${e.target.value}:${thinking}` : e.target.value)}>
+      <option value="">{t("settings.rolesModelNotSet")}</option>
       {value && !known ? <option value={value}>{value}</option> : null}
       {models.map((m) => (
         <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>{m.provider}/{m.id}</option>
@@ -55,6 +55,8 @@ export function OmpRolesPage() {
   }, []);
 
   const save = async (role: string, model: string | null) => {
+    // One write at a time: a second change must not race the pending save.
+    if (busy) return false;
     setBusy(true);
     try {
       const result = await api.ompSetRole({ role, model });
@@ -75,20 +77,20 @@ export function OmpRolesPage() {
         title={t("settings.rolesCard")}
         description={t("settings.rolesDescription")}
       >
-        {error ? <SettingsRow title="Error">{error}</SettingsRow> : null}
-        {!roles && !error ? <SettingsRow title="Loading…">{null}</SettingsRow> : null}
+        {error ? <SettingsRow title={t("settings.rolesError")}>{error}</SettingsRow> : null}
+        {!roles && !error ? <SettingsRow title={t("settings.rolesLoading")}>{null}</SettingsRow> : null}
         {roles?.map((role) => (
-          <SettingsRow key={role.id} title={`${role.id}${role.name !== role.id ? ` · ${role.name}` : ""}`} description={role.builtin ? "Built-in omp role" : "Custom role"}>
+          <SettingsRow key={role.id} title={`${role.id}${role.name !== role.id ? ` · ${role.name}` : ""}`} description={role.builtin ? t("settings.rolesBuiltin") : t("settings.rolesCustom")}>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }} data-omp-role-row={role.id}>
-              <ModelSelect testId={role.id} value={role.model ?? ""} models={models} onChange={(v) => void save(role.id, v || null)} />
+              <ModelSelect testId={role.id} value={role.model ?? ""} models={models} disabled={busy} onChange={(v) => void save(role.id, v || null)} />
               {!role.builtin ? (
                 <Button
                   variant="ghost"
                   data-omp-role-delete={role.id}
                   disabled={busy}
-                  onClick={() => { if (window.confirm(`Delete omp role ${role.id}?`)) void save(role.id, null); }}
+                  onClick={() => { if (window.confirm(t("settings.rolesDeleteConfirm", { role: role.id }))) void save(role.id, null); }}
                 >
-                  Delete
+                  {t("settings.rolesDelete")}
                 </Button>
               ) : null}
             </div>
@@ -96,12 +98,12 @@ export function OmpRolesPage() {
         ))}
       </SettingsCard>
       <SettingsCard title={t("settings.rolesNew")}>
-        <SettingsRow title="Name and model">
+        <SettingsRow title={t("settings.rolesNameModel")}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               className="settings-input"
               data-omp-role-new-name="true"
-              placeholder="e.g. reviewer"
+              placeholder={t("settings.rolesNamePlaceholder")}
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
             />
@@ -111,7 +113,7 @@ export function OmpRolesPage() {
               disabled={busy || !newName.trim() || !newModel}
               onClick={async () => { if (await save(newName.trim(), newModel)) { setNewName(""); setNewModel(""); } }}
             >
-              Create
+              {t("settings.rolesCreate")}
             </Button>
           </div>
         </SettingsRow>

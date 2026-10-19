@@ -36,13 +36,17 @@ export function OmpAccountsSection() {
   }, []);
   useEffect(load, [load]);
 
-  useEffect(() => {
-    if (!login) return;
-    return api.onOmpEvent((event) => {
+  // Subscribed for the section's lifetime: omp may emit its login prompt before
+  // `omp.login.start` settles, and a subscription keyed on the open dialog drops it.
+  useEffect(() =>
+    api.onOmpEvent((event) => {
       if (event.method !== "native.login.ui") return;
-      setLogin((current) => (current ? { ...current, steps: [...current.steps, event.params as LoginUi] } : current));
-    });
-  }, [login?.provider.id]); // eslint-disable-line react-hooks/exhaustive-deps
+      const step = event.params;
+      // Engine data: only the shapes this dialog renders are accepted.
+      if (!step || typeof step !== "object" || !("kind" in step)) return;
+      if (step.kind !== "open_url" && step.kind !== "progress" && step.kind !== "input") return;
+      setLogin((current) => (current ? { ...current, steps: [...current.steps, step as LoginUi] } : current));
+    }), []);
 
   const start = async (provider: Provider) => {
     setLogin({ provider, steps: [] });
@@ -128,8 +132,11 @@ export function OmpAccountsSection() {
 
 function LoginDialog({ provider, steps, onCancel }: { provider: Provider; steps: LoginUi[]; onCancel: () => void }) {
   const { t } = useTranslation();
+  const showToast = useAppStore((s) => s.showToast);
   const [answer, setAnswer] = useState("");
   const [answered, setAnswered] = useState<Set<string>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const link = [...steps].reverse().find((step): step is Extract<LoginUi, { kind: "open_url" }> => step.kind === "open_url");
   const input = [...steps].reverse().find(
     (step): step is Extract<LoginUi, { kind: "input" }> => step.kind === "input" && !answered.has(step.requestId),
@@ -161,18 +168,31 @@ function LoginDialog({ provider, steps, onCancel }: { provider: Provider; steps:
       {input ? (
         <form
           className="omp-login-step"
-          onSubmit={(event) => {
+          onSubmit={async (event) => {
             event.preventDefault();
-            void api.ompCall("omp.login.respond", { requestId: input.requestId, value: answer.trim() });
-            setAnswered((current) => new Set(current).add(input.requestId));
-            setAnswer("");
+            const value = answer.trim();
+            // One submit at a time; a failed delivery keeps the code editable.
+            if (!value || sending) return;
+            setSending(true);
+            try {
+              await api.ompCall("omp.login.respond", { requestId: input.requestId, value });
+              setAnswered((current) => new Set(current).add(input.requestId));
+              setAnswer("");
+              setFailure(null);
+            } catch (reason) {
+              setFailure(errorText(reason));
+              showToast(errorText(reason), { variant: "error" });
+            } finally {
+              setSending(false);
+            }
           }}
         >
           <p>{input.title || t("settings.ompAccounts.pasteCode")}</p>
           <div className="omp-login-row">
             <input className="settings-input omp-login-input" value={answer} placeholder={input.placeholder ?? ""} onChange={(e) => setAnswer(e.target.value)} />
-            <Button type="submit" variant="primary" disabled={!answer.trim()}>{t("settings.ompAccounts.submit")}</Button>
+            <Button type="submit" variant="primary" disabled={!answer.trim() || sending}>{t("settings.ompAccounts.submit")}</Button>
           </div>
+          {failure ? <div className="omp-error" role="alert">{failure}</div> : null}
         </form>
       ) : null}
       {progress.length ? (

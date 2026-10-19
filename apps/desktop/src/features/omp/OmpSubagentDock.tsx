@@ -40,22 +40,27 @@ export function OmpSubagentDock({ sessionId }: { sessionId: string }) {
   const [expanded, setExpanded] = useState(true);
   const [steering, setSteering] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [viewing, setViewing] = useState<OmpSubagent | null>(null);
+  // Scoped to the session that opened it: a switch must not show or query another chat's subagent.
+  const [viewing, setViewing] = useState<{ sessionId: string; agent: OmpSubagent } | null>(null);
 
   useEffect(() => {
     setAgents([]);
     setSteering(null);
+    setViewing(null);
     if (!sessionId.startsWith("native-pi:")) return;
     let live = true;
+    let snapshot = 0;
     void api
       .ompCall<{ subagents: OmpSubagent[] }>("omp.subagents.list", { sessionId })
       .then((result) => {
-        if (live) setAgents(result.subagents ?? []);
+        // A newer event already replaced this list; the late snapshot must not win.
+        if (live && snapshot === 0) setAgents(result.subagents ?? []);
       })
       .catch(() => undefined);
     const off = api.onOmpEvent((event) => {
-      if (event.method !== "native.subagents.changed" || event.params?.sessionId !== sessionId) return;
-      setAgents(Array.isArray(event.params.subagents) ? event.params.subagents : []);
+      if (event.method !== "native.subagents.changed" || event.params.sessionId !== sessionId) return;
+      snapshot += 1;
+      setAgents(Array.isArray(event.params.subagents) ? (event.params.subagents as OmpSubagent[]) : []);
     });
     return () => {
       live = false;
@@ -86,6 +91,8 @@ export function OmpSubagentDock({ sessionId }: { sessionId: string }) {
     }
   };
 
+  // The transcript follows the live record: status/sessionFile updates arrive as events.
+  const open = viewing?.sessionId === sessionId ? agents.find((agent) => agent.id === viewing.agent.id) ?? viewing.agent : null;
   return (
     <div className={cx("omp-subagent-dock", expanded && "is-expanded")}>
       <button type="button" className="omp-subagent-dock-head" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
@@ -115,7 +122,7 @@ export function OmpSubagentDock({ sessionId }: { sessionId: string }) {
                   </span>
                   <span className="omp-subagent-status">{t(`chat.ompSubagents.status.${agent.status}`)}</span>
                   <span className="omp-subagent-actions">
-                    <button type="button" className="omp-mini-btn" title={t("chat.ompSubagents.view")} onClick={() => setViewing(agent)}>
+                    <button type="button" className="omp-mini-btn" title={t("chat.ompSubagents.view")} onClick={() => setViewing({ sessionId, agent })}>
                       <IconEye size={12} />
                     </button>
                     {active ? (
@@ -162,7 +169,7 @@ export function OmpSubagentDock({ sessionId }: { sessionId: string }) {
           })}
         </ul>
       ) : null}
-      {viewing ? <OmpSubagentTranscript sessionId={sessionId} agent={viewing} onClose={() => setViewing(null)} /> : null}
+      {open ? <OmpSubagentTranscript sessionId={sessionId} agent={open} onClose={() => setViewing(null)} /> : null}
     </div>
   );
 }
@@ -173,7 +180,13 @@ function OmpSubagentTranscript({ sessionId, agent, onClose }: { sessionId: strin
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    const load = () =>
+    let reading = false;
+    let sequence = 0;
+    const load = () => {
+      // One read at a time: a slow reply must neither overlap nor outrank a newer one.
+      if (reading) return;
+      reading = true;
+      const read = ++sequence;
       api
         .ompCall<{ messages: UiMessage[] }>("omp.subagents.messages", {
           sessionId,
@@ -181,17 +194,24 @@ function OmpSubagentTranscript({ sessionId, agent, onClose }: { sessionId: strin
           ...(agent.sessionFile ? { sessionFile: agent.sessionFile } : {}),
         })
         .then((result) => {
-          if (live) setMessages(result.messages ?? []);
+          if (!live || read !== sequence) return;
+          setMessages(result.messages ?? []);
+          setError(null);
         })
         .catch((reason) => {
-          if (live) setError(errorText(reason));
+          if (!live || read !== sequence) return;
+          setError(errorText(reason));
+        })
+        .finally(() => {
+          reading = false;
         });
+    };
     void load();
     // A running subagent keeps writing: refresh while the window is open.
-    const timer = ACTIVE.has(agent.status) ? setInterval(() => void load(), 2500) : undefined;
+    const timer = ACTIVE.has(agent.status) ? setInterval(load, 2500) : undefined;
     return () => {
       live = false;
-      if (timer) clearInterval(timer);
+      clearInterval(timer);
     };
   }, [sessionId, agent.id, agent.sessionFile, agent.status]);
   return (
@@ -204,7 +224,9 @@ function OmpSubagentTranscript({ sessionId, agent, onClose }: { sessionId: strin
         {messages?.filter((message) => message.role === "tool" || String(message.content ?? "").trim()).map((message) => (
           <div key={message.id} className={cx("omp-transcript-row", `is-${message.role}`)}>
             <div className="omp-transcript-role">
-              {message.role === "tool" ? `⚙ ${message.toolName ?? "tool"}` : message.role}
+              {message.role === "tool"
+                ? `⚙ ${message.toolName ?? t("chat.ompSubagents.roleTool")}`
+                : message.role === "user" ? t("chat.ompSubagents.roleUser") : t("chat.ompSubagents.roleAssistant")}
             </div>
             {message.role === "tool" ? (
               <pre className="omp-transcript-tool">{String(message.content ?? "").slice(0, 2000)}</pre>

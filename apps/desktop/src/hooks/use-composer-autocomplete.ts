@@ -198,6 +198,17 @@ export function useComposerAutocomplete({
   }, [triggerKey, dismissedKey]);
 
   // Lazy source fetch with a short TTL, keyed by workspace.
+  // omp publishes catalog changes (new skills, extensions) over the omp event
+  // channel; the TTL alone would show a stale slash menu for up to 10s.
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  useEffect(() => {
+    if (!sessionId?.startsWith("native-pi:")) return;
+    return api.onOmpEvent((event) => {
+      if (event.method !== "native.commands.changed" || event.params.sessionId !== sessionId) return;
+      commandsCache = null;
+      setCatalogRevision((revision) => revision + 1);
+    });
+  }, [sessionId]);
   useEffect(() => {
     if (!trigger || dismissed) return;
     const now = Date.now();
@@ -257,7 +268,7 @@ export function useComposerAutocomplete({
     return () => {
       cancelled = true;
     };
-  }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace, fileSourceKey, sessionId, showToast]);
+  }, [trigger?.mode, dismissed, workspaceKey, hasWorkspace, fileSourceKey, sessionId, showToast, catalogRevision]);
 
   const items = useMemo<AutocompleteItem[]>(() => {
     if (!trigger || dismissed) return [];

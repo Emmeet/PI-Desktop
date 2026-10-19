@@ -65,19 +65,21 @@ function OmpBranchTreeDialog({ sessionId, onClose }: { sessionId: string; onClos
   const { t } = useTranslation();
   const forkSessionAt = useAppStore((state) => state.forkSessionAt);
   const showToast = useAppStore((state) => state.showToast);
-  const [nodes, setNodes] = useState<OmpTreeNode[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Scoped to the session the request belongs to: a switch must not fork the old chat's nodes.
+  const [nodes, setNodes] = useState<{ sessionId: string; value: OmpTreeNode[] } | null>(null);
+  const [error, setError] = useState<{ sessionId: string; message: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
+    setError(null);
     api
       .ompCall<{ nodes: OmpTreeNode[]; leafId: string | null }>("omp.tree", { sessionId })
       .then((result) => {
-        if (live) setNodes(result.nodes ?? []);
+        if (live) setNodes({ sessionId, value: result.nodes ?? [] });
       })
       .catch((reason) => {
-        if (live) setError(errorText(reason));
+        if (live) setError({ sessionId, message: errorText(reason) });
       });
     return () => {
       live = false;
@@ -122,13 +124,15 @@ function OmpBranchTreeDialog({ sessionId, onClose }: { sessionId: string; onClos
     );
   };
 
-  const branches = nodes ? countBranches(nodes) : 0;
+  const shown = nodes?.sessionId === sessionId ? nodes.value : null;
+  const failure = error?.sessionId === sessionId ? error.message : null;
+  const branches = shown ? countBranches(shown) : 0;
   return (
     <OmpDialog title={t("chat.ompTree.title")} icon={<IconBranch size={15} />} className="omp-tree-dialog" onClose={onClose}>
       <p className="omp-muted">{t("chat.ompTree.hint", { count: branches })}</p>
-      {error ? <div className="omp-error">{error}</div> : null}
-      {nodes === null && !error ? <div className="omp-muted">{t("common.loading")}</div> : null}
-      <div className="omp-tree">{nodes?.map((node) => renderChain(node, 0))}</div>
+      {failure ? <div className="omp-error">{failure}</div> : null}
+      {shown === null && !failure ? <div className="omp-muted">{t("common.loading")}</div> : null}
+      <div className="omp-tree">{shown?.map((node) => renderChain(node, 0))}</div>
     </OmpDialog>
   );
 }

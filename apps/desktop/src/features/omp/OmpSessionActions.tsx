@@ -21,7 +21,7 @@ export function OmpLoopDock({ sessionId }: { sessionId: string }) {
     let revision = 0;
     setSnapshot({ sessionId, loop: null });
     const off = api.onOmpEvent((event) => {
-      if (event.method !== "native.loop" || event.params?.sessionId !== sessionId) return;
+      if (event.method !== "native.loop" || event.params.sessionId !== sessionId) return;
       revision++;
       setSnapshot({ sessionId, loop: event.params.loop ?? null });
     });

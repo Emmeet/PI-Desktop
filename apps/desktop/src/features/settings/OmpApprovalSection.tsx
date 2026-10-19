@@ -33,6 +33,8 @@ export function OmpApprovalSection() {
   }, []);
 
   const save = async (input: { mode?: OmpApprovalMode; rules?: Record<string, Policy> }) => {
+    // Without the loaded rule set a rule write would drop every other tool's policy.
+    if (input.rules && mode === null) return false;
     setBusy(true);
     try {
       await api.ompApprovalSet(input);
@@ -82,12 +84,12 @@ export function OmpApprovalSection() {
                 value={policy}
                 options={policyOptions}
                 label={tool}
-                disabled={busy}
+                disabled={busy || mode === null}
                 onChange={(value) => void save({ rules: { ...rules, [tool]: value as Policy } })}
               />
               <Button
                 variant="ghost"
-                disabled={busy}
+                disabled={busy || mode === null}
                 onClick={() => {
                   const next = { ...rules };
                   delete next[tool];
@@ -117,7 +119,7 @@ export function OmpApprovalSection() {
             />
             <Button
               style={{ whiteSpace: "nowrap" }}
-              disabled={busy || !/^[\w.:-]{1,80}$/.test(newTool.trim())}
+              disabled={busy || mode === null || !/^[\w.:-]{1,80}$/.test(newTool.trim())}
               onClick={async () => {
                 if (await save({ rules: { ...rules, [newTool.trim()]: newPolicy } })) setNewTool("");
               }}

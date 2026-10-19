@@ -9561,6 +9561,7 @@ host-created files. The full app's file-preview viewer is covered separately.
 | OMP-READY-live-StepFun | 明确选择 StepFun 角色及精确 `stepfun/step-5-preview`，验证支持的推理、不支持 fast 的状态、read/bash/edit、BTW 后续、handoff、goal 续跑、有限循环、slow 回读和缓存预热；记录能力响应和成本。 | 须真实提供商授权；fixture 通过不能证明付费执行、计费语义或不支持的能力 |
 | OMP-READY-native-permissions | 真实 Windows/macOS 同意/拒绝截图权限，投递/重绑无冲突全局快捷键，验证两个聊天窗口原生控件。 | 须实体平台验证，不能用 CSS 分支或私有 X 显示器代替 |
 | OMP-READY-startup-alert-uncertain-queue | 无活动聊天且已关闭引导时启动；OMP 缺失/不兼容自动显示持续本地化警告，含重试/关闭，设置仍可用；修正后重试。保留不确定队列文本/警告，禁用发送/提升/排序/编辑但可移除；结构化重连进度与完成通知使用当前语言。 | `omp-startup-recovery-user-path.test.mjs`；既有 `ompCall` 上允许的 `omp.capability.check`，不新增 IPC，不需付费提供商 |
+| OMP-READY-ui-async-ownership | IPC 延迟回复下：初始列表未返回时到达的子代理事件不被迟到的快照覆盖；慢的转录读取既不重叠也不覆盖更新的读取，刷新成功清除旧错误。切换会话关闭旧转录，且不用旧子代理 id 查询新会话；总额、分支树、审批规则与角色保存归属于发起它们的会话/加载；登录开始 RPC 未返回前出现的输入提示保持可见，验证码发送失败保留可编辑文本。 | `omp-ui-async-user-path.test.mjs`；脚本化 IPC 回复不能替代真实提供商或多窗口证明 |
 
 原生 Windows/macOS 与真实提供商场景在集成负责人记录实际运行前，状态均为**此处未运行**。
 无凭据回归同样须在最终集成候选上实际执行并记录，不从计划推断。此次不做语音测试、
