@@ -76,8 +76,26 @@ export function runOmp(args: string[], options: { timeoutMs?: number; maxBuffer?
   });
 }
 
-export function runOmpConfig(args: string[]): Promise<string> {
-  return runOmp(["config", ...args]);
+let configQueue: Promise<unknown> = Promise.resolve();
+
+function withConfigLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = configQueue.then(operation);
+  configQueue = result.catch(() => undefined);
+  return result;
+}
+
+export function runOmpConfig(args: string[], options: { timeoutMs?: number; maxBuffer?: number } = {}): Promise<string> {
+  return withConfigLock(() => runOmp(["config", ...args], options));
+}
+
+/** Keep the complete read-modify-write atomic with respect to other desktop config commands. */
+export function updateOmpConfig(key: string, update: (value: unknown) => unknown): Promise<unknown> {
+  return withConfigLock(async () => {
+    const current = JSON.parse(await runOmp(["config", "get", key, "--json"])) as { value?: unknown };
+    const value = update(current.value);
+    await runOmp(["config", "set", key, JSON.stringify(value)]);
+    return value;
+  });
 }
 
 /** omp's install directory (its TypeScript sources ship with it), or null. */
@@ -258,7 +276,10 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   const previous: Manifest = { ...EMPTY, ...readJson<Partial<Manifest>>(manifestPath, {}) };
   const next: Manifest = { ...EMPTY, projectMcp: {}, projectAgents: {}, projectSkills: {} };
 
-  const projects = ((await host.call<{ projects?: Array<{ path?: string }> }>("projects.list").catch(() => ({ projects: [] }))).projects ?? [])
+  // A failed project list means "unknown", not "no projects": the project sets
+  // below union `previous`, so this only affects which projects are visited.
+  const listed = await host.call<{ projects?: Array<{ path?: string }> }>("projects.list").catch(() => undefined);
+  const projects = (listed?.projects ?? [])
     .map((project) => project.path)
     .filter((path): path is string => typeof path === "string" && isDirectory(path));
 
@@ -268,9 +289,12 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   next.userMcp = syncMcpFile(join(agentDir, "mcp.json"), globalMcp, previous.userMcp);
   const mcpProjects = new Set([...projects, ...Object.keys(previous.projectMcp)]);
   for (const project of mcpProjects) {
+    // A failed read means "unknown", not "none": projecting an empty list would
+    // delete the project's mirrored servers with no manifest left to restore.
     const active = isDirectory(project)
-      ? ((await host.call<{ servers?: McpServerRecord[] }>("mcp.active", { projectPath: project }).catch(() => ({ servers: [] }))).servers ?? [])
+      ? ((await host.call<{ servers?: McpServerRecord[] }>("mcp.active", { projectPath: project }).catch(() => undefined))?.servers ?? undefined)
       : [];
+    if (!active) { next.projectMcp[project] = previous.projectMcp[project] ?? []; continue; }
     const only = active.filter((server) => !globalIds.has(server.id));
     const names = syncMcpFile(join(project, ".omp", "mcp.json"), only, previous.projectMcp[project] ?? []);
     if (names.length) next.projectMcp[project] = names;
@@ -282,9 +306,11 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   next.userAgents = syncAgentDir(join(agentDir, "agents"), globalAgents, previous.userAgents);
   const agentProjects = new Set([...projects, ...Object.keys(previous.projectAgents)]);
   for (const project of agentProjects) {
+    // Unknown, not none: an empty projection would delete the mirrored agents.
     const active = isDirectory(project)
-      ? ((await host.call<{ subagents?: UserSubagentRecord[] }>("agents.active", { projectPath: project }).catch(() => ({ subagents: [] }))).subagents ?? [])
+      ? ((await host.call<{ subagents?: UserSubagentRecord[] }>("agents.active", { projectPath: project }).catch(() => undefined))?.subagents ?? undefined)
       : [];
+    if (!active) { next.projectAgents[project] = previous.projectAgents[project] ?? []; continue; }
     const only = active.filter((agent) => !globalAgentIds.has(agent.id));
     const files = syncAgentDir(join(project, ".omp", "agents"), only, previous.projectAgents[project] ?? []);
     if (files.length) next.projectAgents[project] = files;
@@ -315,9 +341,15 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   const skillProjects = new Set([...projects, ...Object.keys(previous.projectSkills)]);
   const globalHiddenIn = new Map<string, string[]>();
   for (const project of skillProjects) {
+    // Unknown, not none: an empty projection would delete the mirrored skills.
     const active = isDirectory(project)
-      ? ((await host.call<{ skills?: UserSkillRecord[] }>("skills.active", { projectPath: project }).catch(() => ({ skills: [] }))).skills ?? [])
+      ? ((await host.call<{ skills?: UserSkillRecord[] }>("skills.active", { projectPath: project }).catch(() => undefined))?.skills ?? undefined)
       : [];
+    if (!active) {
+      const kept = previous.projectSkills[project] ?? [];
+      if (kept.length) next.projectSkills[project] = kept;
+      continue;
+    }
     const only = active.filter((skill) => !nativeProjectSkill(skill) && !globalSkillIds.has(skill.id));
     const ids = syncSkillDir(join(project, ".omp", "skills"), only, previous.projectSkills[project] ?? []);
     if (ids.length) next.projectSkills[project] = ids;
@@ -335,12 +367,16 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
   // carried into the project list.
   let globalIgnored: string[] = [];
   try {
-    const current = JSON.parse(await runOmpConfig(["get", "skills.ignoredSkills", "--json"])) as { value?: unknown };
-    globalIgnored = Array.isArray(current.value) ? current.value.filter((v): v is string => typeof v === "string") : [];
     // Earlier builds wrote switched-off skills into the global list; take them back out.
     if (previous.ignoredSkills.length) {
-      globalIgnored = globalIgnored.filter((name) => !previous.ignoredSkills.includes(name));
-      await runOmpConfig(["set", "skills.ignoredSkills", JSON.stringify(globalIgnored)]);
+      const value = await updateOmpConfig("skills.ignoredSkills", (current) =>
+        Array.isArray(current) ? current.filter((name): name is string => typeof name === "string" && !previous.ignoredSkills.includes(name)) : []);
+      globalIgnored = Array.isArray(value) ? value.filter((name): name is string => typeof name === "string") : [];
+    } else {
+      const current: unknown = JSON.parse(await runOmpConfig(["get", "skills.ignoredSkills", "--json"]));
+      if (current && typeof current === "object" && "value" in current && Array.isArray(current.value)) {
+        globalIgnored = current.value.filter((name): name is string => typeof name === "string");
+      }
     }
   } catch (error) {
     options.log?.("omp skills ignore read failed", String(error));
@@ -361,12 +397,15 @@ export async function syncOmpCapabilities(host: HostLike, options: OmpCapability
     const path = join(project, ".omp", "settings.json");
     const file = readJson<Record<string, unknown>>(path, {});
     const skills = { ...((file.skills as Record<string, unknown> | undefined) ?? {}) };
-    if (off.length) {
-      skills.ignoredSkills = [...new Set([...globalIgnored, ...off])];
-      next.projectIgnored[project] = off;
-    } else {
-      delete skills.ignoredSkills;
-    }
+    const retained = Array.isArray(skills.ignoredSkills)
+      ? skills.ignoredSkills.filter((name): name is string => typeof name === "string" && !had?.includes(name))
+      : [];
+    const added = off.length ? [...new Set([...globalIgnored, ...off])].filter((name) => !retained.includes(name)) : [];
+    const ignored = [...retained, ...added];
+    if (ignored.length) skills.ignoredSkills = ignored;
+    else delete skills.ignoredSkills;
+    // Track only names inserted by Desktop, never entries already owned by the user.
+    if (off.length) next.projectIgnored[project] = added;
     const updated: Record<string, unknown> = { ...file, skills };
     if (!Object.keys(skills).length) delete updated.skills;
     if (!Object.keys(updated).length) rmSync(path, { force: true });
@@ -538,7 +577,8 @@ export async function ompAgentCatalog(options: OmpCapabilitySyncOptions & { proj
 
 /** Switch one omp agent on/off through omp's `task.disabledAgents`, keeping the user's other entries. */
 export async function setOmpAgentEnabled(name: string, enabled: boolean): Promise<void> {
-  const current = await disabledAgents();
-  const next = enabled ? current.filter((entry) => entry !== name) : [...new Set([...current, name])];
-  await runOmpConfig(["set", "task.disabledAgents", JSON.stringify(next)]);
+  await updateOmpConfig("task.disabledAgents", (value) => {
+    const current = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+    return enabled ? current.filter((entry) => entry !== name) : [...new Set([...current, name])];
+  });
 }

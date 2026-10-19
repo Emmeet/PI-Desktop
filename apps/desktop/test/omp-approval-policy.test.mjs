@@ -70,6 +70,7 @@ function harness(stored = {}) {
   const { registerAgentIpc } = load("../electron/main/ipc/agent-ipc.ts", {
     "node:path": path, "@pi-desktop/shared": shared, "@pi-desktop/agent-runtime": {},
     "@pi-desktop/host-runtime": {}, "../composer-mcp": {}, "../prompt-attachments": {}, "../session-references": {},
+    "../omp-capability-sync": { runOmpConfig },
   });
   registerAgentIpc({ registrar, getHost: () => host, getSidecar: () => sidecar, getAgentHostBridge: () => null,
     setNotificationViewingSessionId() {} });

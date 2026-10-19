@@ -14,6 +14,7 @@ import type { Logger } from "../logger";
 import type { PersistenceOutbox } from "../persistence-outbox";
 import type { ComposerCommandService } from "./composer-ipc";
 import type { IpcRegistrar } from "./types";
+import { updateOmpConfig } from "../omp-capability-sync";
 
 export type AgentIpcDependencies = {
   registrar: IpcRegistrar;
@@ -810,11 +811,10 @@ export function registerAgentIpc({
         ).catch(() => ({ permissions: [] }));
         const toolName = pending.permissions.find((entry) => entry.requestId === resolution.requestId)?.toolName;
         if (toolName) {
-          const current = JSON.parse(await (await import("../omp-capability-sync")).runOmpConfig(["get", "tools.approval", "--json"])) as { value?: unknown };
-          const rules = current.value && typeof current.value === "object" && !Array.isArray(current.value)
-            ? current.value as Record<string, string>
-            : {};
-          await (await import("../omp-capability-sync")).runOmpConfig(["set", "tools.approval", JSON.stringify({ ...rules, [toolName]: "allow" })]);
+          await updateOmpConfig("tools.approval", (value) => {
+            const rules = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+            return { ...rules, [toolName]: "allow" };
+          });
         }
       }
       return sidecar.call("omp.ui.respond", {
