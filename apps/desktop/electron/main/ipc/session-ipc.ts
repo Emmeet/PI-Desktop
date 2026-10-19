@@ -293,8 +293,15 @@ export function registerSessionIpc({
     if (!Object.hasOwn(OMP_RENDERER_CALLS, method)) {
       throw Object.assign(new Error(`omp call not allowed: ${method}`), { errorCode: "INVALID_ARGUMENT" });
     }
-    const params = input?.params && typeof input.params === "object" ? input.params : {};
-    return sidecar.call(method, params);
+    // HTML export writes a file at a path the engine chose; the only sanctioned
+    // path is `ompExportHtml`, which runs the native save dialog first.
+    if (method === "omp.session.command") {
+      const command = (input?.params as { command?: unknown } | undefined)?.command;
+      if (command && typeof command === "object" && !Array.isArray(command) && "type" in command && (command as { type: unknown }).type === "export_html") {
+        throw Object.assign(new Error("HTML exports require the native save dialog"), { errorCode: "PERMISSION_DENIED" });
+      }
+    }
+    return sidecar.call(method, input?.params && typeof input.params === "object" ? input.params : {});
   });
   handle(IPC.invoke.ompThinkingSet, async (input: { sessionId?: string; level?: string } = {}) => {
     if (!sidecar) throw new Error("agent sidecar unavailable");

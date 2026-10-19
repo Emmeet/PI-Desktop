@@ -7,6 +7,7 @@ import type { HostProcess } from "../host-process";
 import type { McpRegistrySearchResult } from "../mcp-registry-catalog";
 import type { UserMcpRuntime } from "../user-mcp";
 import type { IpcRegistrar } from "./types";
+import { openAllowedExternal } from "../safe-open-external";
 
 export type McpIpcDependencies = {
   registrar: IpcRegistrar;
@@ -193,8 +194,10 @@ handle(IPC.invoke.mcpList, async (query: Partial<AgentCapabilityQuery> = {}) => 
         sendToRenderer(IPC.event.mcpOauth, { loginId, serverId: server.id, ...event });
       void runOmpMcpOAuth(server.url, (event) => {
         if (event.kind === "authUrl") {
-          void shell.openExternal(event.url).catch(() => undefined);
-          emit({ kind: "authUrl", url: event.url, opened: true });
+          void openAllowedExternal(event.url, (url) => shell.openExternal(url)).then(
+            () => emit({ kind: "authUrl", url: event.url, opened: true }),
+            () => emit({ kind: "authUrl", url: event.url, opened: false }),
+          );
         } else {
           emit({ kind: "progress", message: event.message });
         }

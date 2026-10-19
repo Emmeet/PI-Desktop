@@ -10,13 +10,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { app, BrowserWindow, dialog, shell } from "electron";
-import { readFile, realpath, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { open, readFile, realpath, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { IPC, type ComposerCommand } from "@pi-desktop/shared";
 import type { IpcRegistrar } from "./types";
 import { bunBinary, ompPackageDir, runOmp, runOmpConfig } from "../omp-capability-sync";
 import { desktopDataDir } from "../data-paths";
+import { isAllowedHttpUrl } from "../safe-open-external";
+import { catalogs, resolveLocale } from "@pi-desktop/i18n";
 
 export const MCP_OAUTH_HELPER = `
 const pkg = process.env.OMP_PKG_DIR;
@@ -93,14 +95,12 @@ export function ompMcpSignedIn(url: string | undefined): boolean {
   return Boolean(url) && readMarker().includes(String(url));
 }
 
-let running: ChildProcessWithoutNullStreams | null = null;
+let running: { child: ChildProcessWithoutNullStreams; cancel: () => void } | null = null;
 
 /** Stop the MCP sign-in in progress, if any. */
 export function cancelOmpMcpOAuth(): boolean {
-  const child = running;
-  if (!child) return false;
-  try { child.stdin.write("cancel\n"); } catch { /* gone */ }
-  setTimeout(() => child.kill(), 1500).unref?.();
+  if (!running) return false;
+  running.cancel();
   return true;
 }
 
@@ -110,58 +110,99 @@ export function cancelOmpMcpOAuth(): boolean {
  * the browser step finished and the token is stored.
  */
 export async function runOmpMcpOAuth(url: string, onEvent: (event: OmpMcpOAuthEvent) => void): Promise<void> {
-  if (!/^https?:\/\//i.test(url)) throw Object.assign(new Error("Enter the server's http(s) URL"), { errorCode: "INVALID_ARGUMENT" });
+  if (!isAllowedHttpUrl(url)) throw Object.assign(new Error("Enter the server's http(s) URL"), { errorCode: "INVALID_ARGUMENT" });
   if (running) throw Object.assign(new Error("Another MCP sign-in is in progress"), { errorCode: "AGENT_BUSY" });
   const pkg = ompPackageDir();
   if (!pkg) throw new Error("omp's install folder was not found, so MCP sign-in is unavailable");
   const dir = mkdtempSync(join(tmpdir(), "omp-mcp-oauth-"));
-  const script = join(dir, "oauth.mjs");
-  writeFileSync(script, MCP_OAUTH_HELPER);
-  const child = spawn(bunBinary(), [script, url], { env: { ...process.env, OMP_PKG_DIR: pkg }, windowsHide: true });
-  running = child;
-  await new Promise<void>((resolve, reject) => {
-    let result: { ok: boolean; message?: string } | null = null;
-    let buffer = "";
-    child.stdout.on("data", (chunk) => {
-      buffer += String(chunk);
-      let index: number;
-      while ((index = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, index).trim();
-        buffer = buffer.slice(index + 1);
-        if (!line) continue;
-        let event: { type?: string; url?: string; message?: string };
-        try { event = JSON.parse(line); } catch { continue; }
-        if (event.type === "auth" && event.url) onEvent({ kind: "authUrl", url: event.url });
-        else if (event.type === "progress" && event.message) onEvent({ kind: "progress", message: event.message });
-        else if (event.type === "done") result = { ok: true };
-        else if (event.type === "error") result = { ok: false, message: event.message };
-      }
-    });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => { stderr = (stderr + String(chunk)).slice(-2000); });
-    child.on("error", (error) => { if (running === child) running = null; reject(error); });
-    child.on("exit", () => {
-      if (running === child) running = null;
-      rmSync(dir, { recursive: true, force: true });
-      if (result?.ok) {
-        const marked = readMarker();
-        if (!marked.includes(url)) {
-          mkdirSync(desktopDataDir(), { recursive: true });
-          writeFileSync(join(desktopDataDir(), "omp-mcp-oauth.json"), JSON.stringify([...marked, url], null, 2));
+  try {
+    const script = join(dir, "oauth.mjs");
+    writeFileSync(script, MCP_OAUTH_HELPER);
+    const child = spawn(bunBinary(), [script, url], { env: { ...process.env, OMP_PKG_DIR: pkg }, windowsHide: true });
+    await new Promise<void>((resolve, reject) => {
+      let result: { ok: boolean; message?: string } | null = null;
+      let buffer = "";
+      let stderr = "";
+      let settled = false;
+      let cancelTimer: NodeJS.Timeout | undefined;
+      const cancel = () => {
+        if (settled || cancelTimer) return;
+        try { child.stdin.write("cancel\n"); } catch { /* gone */ }
+        cancelTimer = setTimeout(() => child.kill(), 1500);
+        cancelTimer.unref?.();
+      };
+      const onQuit = () => { child.kill(); };
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(cancelTimer);
+        if (running?.child === child) running = null;
+        app.removeListener("will-quit", onQuit);
+        child.stdout.removeListener("data", onStdout);
+        child.stderr.removeListener("data", onStderr);
+        child.stdin.removeListener("error", onStdinError);
+        child.removeListener("error", onError);
+        child.removeListener("close", onClose);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onError = (error: Error) => finish(error);
+      const onStdinError = () => { /* Cancellation may race a helper closing its input. */ };
+      const onStderr = (chunk: Buffer) => { stderr = (stderr + String(chunk)).slice(-2000); };
+      const onStdout = (chunk: Buffer) => {
+        buffer += String(chunk);
+        let index: number;
+        while ((index = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, index).trim();
+          buffer = buffer.slice(index + 1);
+          if (!line) continue;
+          let event: unknown;
+          try { event = JSON.parse(line); } catch { continue; }
+          if (!event || typeof event !== "object" || !("type" in event)) continue;
+          try {
+            if (event.type === "auth" && "url" in event) {
+              if (typeof event.url !== "string" || !isAllowedHttpUrl(event.url)) throw new Error("Invalid OAuth authorization URL");
+              onEvent({ kind: "authUrl", url: event.url });
+            } else if (event.type === "progress" && "message" in event && typeof event.message === "string") {
+              onEvent({ kind: "progress", message: event.message });
+            } else if (event.type === "done") result = { ok: true };
+            else if (event.type === "error") result = { ok: false, message: "message" in event && typeof event.message === "string" ? event.message : undefined };
+          } catch (error) {
+            child.kill();
+            finish(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
         }
-        resolve();
-      } else {
-        reject(Object.assign(new Error(result?.message ?? (stderr.trim().split("\n").at(-1) || "MCP sign-in was cancelled")), {
-          cancelled: !result,
-        }));
-      }
+      };
+      const onClose = () => {
+        try {
+          if (!result?.ok) throw Object.assign(new Error(result?.message ?? (stderr.trim().split("\n").at(-1) || "MCP sign-in was cancelled")), { cancelled: !result });
+          const marked = readMarker();
+          if (!marked.includes(url)) {
+            mkdirSync(desktopDataDir(), { recursive: true });
+            writeFileSync(join(desktopDataDir(), "omp-mcp-oauth.json"), JSON.stringify([...marked, url], null, 2));
+          }
+          finish();
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(String(error)));
+        }
+      };
+      running = { child, cancel };
+      child.stdout.on("data", onStdout);
+      child.stderr.on("data", onStderr);
+      child.stdin.on("error", onStdinError);
+      child.once("error", onError);
+      child.once("close", onClose);
+      app.once("will-quit", onQuit);
     });
-  });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
-const oneOf = (...values: string[]) => (value: unknown) => values.includes(String(value));
+const oneOf = (...values: string[]) => (value: unknown) => typeof value === "string" && values.includes(value);
 const bool = (value: unknown) => typeof value === "boolean";
-const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 10_000_000;
+const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000;
 const themeName = (value: unknown) => typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value);
 
 /** omp settings the renderer may read and change, with their allowed values. */
@@ -241,7 +282,7 @@ export function registerOmpExtrasIpc({
   registrar.handle(IPC.invoke.ompConfigGet, async () => {
     // One `omp config list` instead of a process per key; only allow-listed
     // keys ever leave the main process (the list also holds auth settings).
-    const listed = JSON.parse(await runOmp(["config", "list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
+    const listed = JSON.parse(await runOmpConfig(["list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
     const values: Record<string, unknown> = {};
     for (const key of Object.keys(OMP_SETTINGS)) {
       if (listed[key] && "value" in listed[key]) values[key] = listed[key].value;
@@ -305,15 +346,15 @@ export function registerOmpExtrasIpc({
   });
 
   registrar.handle(IPC.invoke.ompConfigSet, async (input: { key?: string; value?: unknown } = {}) => {
-    const key = String(input?.key ?? "");
-    const valid = OMP_SETTINGS[key];
+    const key = typeof input?.key === "string" ? input.key : "";
+    const valid = Object.hasOwn(OMP_SETTINGS, key) ? OMP_SETTINGS[key] : undefined;
     if (!valid || !valid(input?.value)) {
       throw Object.assign(new Error(`Not an allowed omp setting: ${key}`), { errorCode: "INVALID_ARGUMENT" });
     }
     await runOmpConfig(["set", key, String(input.value)]);
     // Idle chats restart with the new setting on their next message.
     await getSidecar?.()?.call("omp.runtimes.recycle", {});
-    const listed = JSON.parse(await runOmp(["config", "list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
+    const listed = JSON.parse(await runOmpConfig(["list", "--json"], { timeoutMs: 30_000, maxBuffer: 8 << 20 })) as Record<string, { value?: unknown }>;
     const value = listed[key]?.value;
     if (!valid(value)) throw new Error("OMP returned an invalid setting value after saving");
     sendToRenderer?.(IPC.event.ompEvent, { method: "omp.config.changed", params: { key, value } });
@@ -329,22 +370,53 @@ export function registerOmpExtrasIpc({
 
   registrar.handleWithEvent(IPC.invoke.ompRevertEdit, async (event, input: { path?: string; oldText?: string; newText?: string } = {}) => {
     (registrar.assertChatWindowSender ?? registrar.assertMainWindowSender)(event);
-    const path = String(input?.path ?? "");
-    if (!path || !isAbsolute(path) || typeof input?.oldText !== "string" || typeof input?.newText !== "string") {
+    const path = input?.path;
+    if (typeof path !== "string" || !isAbsolute(path) || /[\u0000-\u001f\u007f]/.test(path) || typeof input?.oldText !== "string" || typeof input?.newText !== "string") {
       throw Object.assign(new Error("Nothing to revert"), { errorCode: "INVALID_ARGUMENT" });
     }
-    let current: string;
-    try {
-      current = await readFile(path, "utf8");
-    } catch {
+    const canonical = await realpath(path).catch(() => {
       throw Object.assign(new Error("The file no longer exists"), { errorCode: "NOT_FOUND" });
+    });
+    const original = await stat(canonical);
+    if (!original.isFile()) throw Object.assign(new Error("Nothing to revert"), { errorCode: "INVALID_ARGUMENT" });
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (!owner || owner.isDestroyed()) throw new Error("chat window unavailable");
+    const strings = catalogs[resolveLocale(app.getLocale())];
+    const approval = strings.omp.hostApproval;
+    const choice = await dialog.showMessageBox(owner, {
+      type: "warning",
+      title: approval.title,
+      message: strings.chat.ompEditRevert,
+      detail: `${canonical}\n\n${approval.detail}`,
+      buttons: [approval.deny, approval.allow],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (choice.response !== 1 || owner.isDestroyed() || event.sender.isDestroyed()) {
+      throw Object.assign(new Error("File access denied by the user"), { errorCode: "PERMISSION_DENIED" });
     }
-    if (current === input.oldText) return { ok: true, alreadyReverted: true };
-    if (current !== input.newText) {
-      throw Object.assign(new Error("The file changed after this edit, so it was not reverted"), { errorCode: "CONFLICT" });
+    const conflict = () => Object.assign(new Error("The file changed after this edit, so it was not reverted"), { errorCode: "CONFLICT" });
+    if (await realpath(path).catch(() => null) !== canonical) throw conflict();
+    const file = await open(canonical, "r+");
+    try {
+      const currentStat = await file.stat();
+      if (currentStat.dev !== original.dev || currentStat.ino !== original.ino || !currentStat.isFile()) throw conflict();
+      const current = await file.readFile("utf8");
+      if (current === input.oldText) return { ok: true, alreadyReverted: true };
+      if (current !== input.newText) throw conflict();
+      const replacement = Buffer.from(input.oldText, "utf8");
+      let written = 0;
+      while (written < replacement.length) {
+        const { bytesWritten } = await file.write(replacement, written, replacement.length - written, written);
+        if (!bytesWritten) throw new Error("Unable to write reverted file");
+        written += bytesWritten;
+      }
+      await file.truncate(replacement.length);
+      return { ok: true };
+    } finally {
+      await file.close();
     }
-    await writeFile(path, input.oldText, "utf8");
-    return { ok: true };
   });
 
 }
